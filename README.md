@@ -1,8 +1,6 @@
-# Computer Use Agent for MacOS (GPT-4o mini runner, python)
+# Computer Use Agent for MacOS
 
-A minimal yet powerful macOS desktop app that turns your GPT‑4o-mini API into a live Python automation agent — with semantic caching, code execution, and feedback archiving built-in.
-
----
+Computer use agent that runs on MacOS under GPT-4o-mini, with smart cache system, and embedded inside a python app.
 
 ### Features
 
@@ -12,15 +10,11 @@ A minimal yet powerful macOS desktop app that turns your GPT‑4o-mini API into 
 * **Lightweight UI:** Built with native macOS Cocoa via `pyobjc`.
 * **Cost-efficient:** Uses OpenAI’s cheapest GPT‑4-class model (`gpt-4o-mini`).
 
----
-
 ### Example Use Cases
 
 * Automate Mac tasks (scripts, file operations, UI actions)
 * Prototype Python snippets rapidly
 * Learn by doing: GPT-generated code is visible and editable
-
----
 
 ### Requirements
 
@@ -33,8 +27,6 @@ A minimal yet powerful macOS desktop app that turns your GPT‑4o-mini API into 
   OPENAI_API_KEY=sk-...
   ```
 
----
-
 ### Getting Started
 
 ```bash
@@ -45,8 +37,6 @@ python3 mini_focus_openai.py
 
 Make sure your `.env` file contains a valid OpenAI API key.
 
----
-
 ### How It Works
 
 1. **Prompt Input:** You describe what you want.
@@ -55,15 +45,11 @@ Make sure your `.env` file contains a valid OpenAI API key.
 4. **Execution:** The script runs live in a subprocess.
 5. **Feedback:** Rate the output. The script is stored to `./success/` or `./fail/`.
 
----
-
 ### Output Folders
 
 * `success/`: Scripts that executed successfully
 * `fail/`: Failed or rejected ones
 * Scripts are saved with timestamped filenames and the original prompt as a header
-
----
 
 ### Developer Notes
 
@@ -71,23 +57,17 @@ Make sure your `.env` file contains a valid OpenAI API key.
 * Cache: Fuzzy-matched based on prompt + validated by GPT
 * Feedback: Saves reusable snippets to disk
 
----
-
 ### Revision History
 
 * **2025‑06‑24 a** — Initial GUI code-runner.
 * **2025‑06‑24 b** — Smart cache logic and feedback archive bug-fix.
 * **2025‑06‑24 c** — Fixed GUI button wiring and feedback toggle restore.
 
----
-
 ### To-Do
 
 * [ ] Multi-line prompt support
 * [ ] Custom temperature / model options
 * [ ] Markdown preview for generated code
-
----
 
 ### License
 
