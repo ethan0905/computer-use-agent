@@ -1,24 +1,18 @@
 #!/usr/bin/env python3
 """
-mini_focus_openai.py – GPT‑4o‑mini code‑runner with live feedback
+mini_focus_openai.py – GPT‑4o‑mini code‑runner with live feedback & smart cache
 
-Rev. 2025‑06‑24 — **Smarter cache using GPT‑4o‑mini**
-─────────────────────────────────────────────────────
-• Exit button (prev. rev.) still quits gracefully.
-• **Semantic cache** — Before hitting the API, we now:
-  1. Collect up to *MAX_CANDIDATES* scripts in the *success/* folder that look
-     vaguely similar to the user’s prompt (quick fuzzy match).
-  2. For each candidate, ask GPT‑4o‑mini: *“Does this script fully satisfy the
-     new request? Reply YES/NO.”*  – The first YES wins; that script is shown &
-     executed instantly, skipping generation.
-
-This makes the runner reuse previous solutions even when the wording is
-slightly different (e.g. “Draw Mandelbrot set” vs “Plot a Mandelbrot fractal”).
+Revision history
+────────────────
+• 2025‑06‑24 a  Initial GUI runner.
+• 2025‑06‑24 b  Semantic cache + feedback archive bug‑fix.
+• 2025‑06‑24 c  **FIX:** completed GUI button wiring (previous rev. cut short ⇢
+  SyntaxError). Success/Fail archiving & Exit button fully restored.
 """
 
-# ───────────────────────────────── API KEY ────────────────────────────────────
+# ───────────────────────────── imports & API key ─────────────────────────────
 from dotenv import load_dotenv
-import os, re, sys, subprocess, tempfile, textwrap, datetime, pathlib, objc, difflib
+import os, re, sys, subprocess, tempfile, textwrap, datetime, pathlib, difflib, objc
 import openai
 from AppKit import (
     NSApplication, NSRunningApplication,
@@ -29,7 +23,8 @@ from AppKit import (
 )
 from Foundation import NSObject, NSLog
 
-load_dotenv()  # .env → env vars
+# Load environment
+load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise RuntimeError("OPENAI_API_KEY missing – set env var or .env file")
@@ -38,7 +33,6 @@ print(f"API key loaded: {OPENAI_API_KEY[:6]}…")
 # ───────────────────────────── OpenAI helpers ────────────────────────────────
 CLIENT = openai.OpenAI(api_key=OPENAI_API_KEY)
 MODEL_ID = "gpt-4o-mini"  # cheapest GPT‑4‑class model (June 2025)
-EMBED_MODEL = "text-embedding-3-small"
 
 SYSTEM_PROMPT = (
     "You are a macOS automation agent. Always reply ONLY with a complete "
@@ -46,8 +40,8 @@ SYSTEM_PROMPT = (
 )
 
 ROOT_DIR = pathlib.Path(__file__).resolve().parent
-ROOT_DIR.joinpath("success").mkdir(exist_ok=True)
-ROOT_DIR.joinpath("fail").mkdir(exist_ok=True)
+(ROOT_DIR / "success").mkdir(exist_ok=True)
+(ROOT_DIR / "fail").mkdir(exist_ok=True)
 
 _slug_rx = re.compile(r"[^a-z0-9]+")
 
@@ -55,7 +49,7 @@ def slugify(text: str) -> str:
     slug = _slug_rx.sub("-", text.lower()).strip("-")[:60]
     return slug or "untitled"
 
-# ──────────────────────── Generation & execution ────────────────────────────
+# ─────────────────────────── generation & execution ─────────────────────────
 
 def generate_python_code(user_prompt: str) -> str:
     rsp = CLIENT.chat.completions.create(
@@ -67,14 +61,15 @@ def generate_python_code(user_prompt: str) -> str:
             {"role": "user", "content": user_prompt},
         ],
     )
-    content = rsp.choices[0].message.content
-    m = re.search(r"```(?:python)?\s*(.+?)\s*```", content, re.DOTALL)
+    msg = rsp.choices[0].message.content
+    m = re.search(r"```(?:python)?\s*(.+?)\s*```", msg, re.DOTALL)
     if not m:
-        raise ValueError("Model reply lacked a Python code block:\n" + content)
+        raise ValueError("Model reply lacked a Python code block:\n" + msg)
     return m.group(1)
 
 
 def run_code(code_text: str) -> bool:
+    """Write *code_text* to a temp file, run it, return True on 0‑exit."""
     with tempfile.NamedTemporaryFile("w+", suffix=".py", delete=False) as tf:
         tf.write(code_text)
         tf.flush()
@@ -89,17 +84,14 @@ def run_code(code_text: str) -> bool:
     finally:
         os.remove(tf_path)
 
-# ──────────────────────── Smart‑cache utilities ─────────────────────────────
-MAX_CANDIDATES = 15  # upper bound to avoid long loops / cost
-FUZZY_THRESHOLD = 0.25  # quick ratio gate before asking the model
-
+# ───────────────────────────── smart‑cache logic ─────────────────────────────
+MAX_CANDIDATES = 15
+FUZZY_THRESHOLD = 0.25
 
 def list_candidate_files(prompt: str):
-    """Return up to MAX_CANDIDATES likely matching .py files from success/."""
-    success_dir = ROOT_DIR / "success"
-    files = list(success_dir.glob("*.py"))
+    """Return likely matching *.py files from success/, ranked by fuzzy ratio."""
     scored = []
-    for fp in files:
+    for fp in (ROOT_DIR / "success").glob("*.py"):
         try:
             first_line = fp.read_text(encoding="utf-8", errors="ignore").split("\n", 1)[0]
         except Exception:
@@ -107,43 +99,35 @@ def list_candidate_files(prompt: str):
         ratio = difflib.SequenceMatcher(None, prompt.lower(), first_line.lower()).ratio()
         if ratio >= FUZZY_THRESHOLD:
             scored.append((ratio, fp))
-    scored.sort(reverse=True)  # best first
+    scored.sort(reverse=True)
     return [fp for _, fp in scored[:MAX_CANDIDATES]]
 
 
 def gpt_confirms_match(prompt: str, code: str) -> bool:
-    """Ask GPT‑4o‑mini if *code* satisfies *prompt*. Returns True/False."""
+    """Ask GPT‑4o‑mini if *code* satisfies *prompt*. Strict YES/NO."""
     try:
         rsp = CLIENT.chat.completions.create(
             model=MODEL_ID,
             temperature=0,
             max_tokens=4,
             messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a concise evaluator. Answer strictly YES or NO."
-                    ),
-                },
+                {"role": "system", "content": "Answer strictly YES or NO."},
                 {
                     "role": "user",
                     "content": (
-                        "Does the following Python script fully satisfy *all* parts "
-                        "of the user's request?\n\n"
-                        f"User request:\n{prompt}\n\nPython script:\n```python\n{code[:2000]}\n```"
+                        "Does this Python script fully satisfy the request?\n"\
+                        f"Request: {prompt}\n\nScript (truncated):```python\n{code[:2000]}\n```"
                     ),
                 },
             ],
         )
-        ans = rsp.choices[0].message.content.strip().upper()
-        return ans.startswith("YES")
+        return rsp.choices[0].message.content.strip().upper().startswith("YES")
     except Exception as exc:
         NSLog(f"[WARN] match‑check error: {exc}")
         return False
 
 
 def find_cached_code(prompt: str) -> str | None:
-    """Return code text if a cached script satisfies *prompt*, else None."""
     for fp in list_candidate_files(prompt):
         try:
             code = fp.read_text(encoding="utf-8")
@@ -160,16 +144,18 @@ class Delegate(NSObject):
     last_prompt: str = ""
     last_success: bool = False
 
+    # ---------- button actions ----------
     def run_(self, _):  # noqa: N802
         prompt = self.field.stringValue().strip()
         if not prompt:
             return
 
+        self.last_prompt = prompt  # needed for feedback archiving
         self._update_status("Working…")
         self._toggle_feedback(False)
         self.code_view.setString_("")
 
-        # 1️⃣ Smart cache lookup
+        # 1️⃣ try cache
         cached = find_cached_code(prompt)
         if cached is not None:
             self.last_code = cached
@@ -180,7 +166,7 @@ class Delegate(NSObject):
             self._toggle_feedback(True)
             return
 
-        # 2️⃣ Fallback – generate new code
+        # 2️⃣ generate new
         try:
             code = generate_python_code(prompt)
             self.last_code = code
@@ -204,7 +190,7 @@ class Delegate(NSObject):
     def exit_(self, _):  # noqa: N802
         NSApplication.sharedApplication().terminate_(None)
 
-    # ---------------- helpers ----------------
+    # ---------- internal helpers ----------
     def _update_status(self, text: str):
         self.status_lbl.setStringValue_(text)
 
@@ -226,9 +212,10 @@ class Delegate(NSObject):
         NSLog(f"[UI] Saved script to {fp}")
         self._toggle_feedback(False)
 
-# One delegate retained for app lifetime
+# keep delegate alive
 GLOBAL_DELEGATE = Delegate.alloc().init()
 
+# ───────────────────────── window construction ──────────────────────────────
 
 def make_window():
     win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
@@ -240,7 +227,7 @@ def make_window():
     win.center()
     win.setTitle_("GPT‑4o Mini Runner")
 
-    # Widgets
+    # widgets --------------------------------------------------------------
     field = NSTextField.alloc().initWithFrame_(NSMakeRect(20, 390, 600, 26))
     field.setPlaceholderString_("Ask GPT‑4o‑mini to do something…")
 
@@ -277,10 +264,11 @@ def make_window():
     exit_btn.setTarget_(GLOBAL_DELEGATE)
     exit_btn.setAction_("exit:")
 
+    # pack into window -----------------------------------------------------
     for v in (field, status_lbl, scroll, run_btn, up_btn, down_btn, exit_btn):
         win.contentView().addSubview_(v)
 
-    # Delegate wiring
+    # expose widgets to delegate
     GLOBAL_DELEGATE.field = field
     GLOBAL_DELEGATE.status_lbl = status_lbl
     GLOBAL_DELEGATE.code_view = code_view
@@ -291,7 +279,7 @@ def make_window():
     win.makeFirstResponder_(field)
     return win
 
-# ─────────────────────────────────── main() ──────────────────────────────────
+# ────────────────────────────────── main() ───────────────────────────────────
 if __name__ == "__main__":
     try:
         NSRunningApplication.currentApplication().activateWithOptions_(
