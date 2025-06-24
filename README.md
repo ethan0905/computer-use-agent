@@ -1,28 +1,94 @@
-# Computer Use Agent
+# Computer Use Agent for MacOS (GPT-4o mini runner, python)
 
-This repository contains a small example of a "computer use" agent for macOS.
-The agent is written in Python and displays a minimal overlay similar to the
-Spotlight search bar. When you type a natural language request in the overlay,
-it generates AppleScript code and executes it using `osascript`.
+A minimal yet powerful macOS desktop app that turns your GPT‑4o-mini API into a live Python automation agent — with semantic caching, code execution, and feedback archiving built-in.
 
-## Requirements
+---
 
-- macOS system with Python 3.
-- Tkinter (usually included with Python on macOS).
+### Features
 
-## Usage
+* **Ask & Run:** Type a prompt, hit **Run**, and GPT‑4o-mini generates + executes Python code.
+* **Smart Cache:** Detects and reuses previously successful scripts using fuzzy matching and GPT validation.
+* **Live Feedback Loop:** Instantly archive outputs as success or fail, with 1-click thumbs up/down.
+* **Lightweight UI:** Built with native macOS Cocoa via `pyobjc`.
+* **Cost-efficient:** Uses OpenAI’s cheapest GPT‑4-class model (`gpt-4o-mini`).
 
-Run the agent with:
+---
+
+### Example Use Cases
+
+* Automate Mac tasks (scripts, file operations, UI actions)
+* Prototype Python snippets rapidly
+* Learn by doing: GPT-generated code is visible and editable
+
+---
+
+### Requirements
+
+* macOS
+* Python 3.8+
+* `pip install openai python-dotenv pyobjc`
+* `.env` file with:
+
+  ```
+  OPENAI_API_KEY=sk-...
+  ```
+
+---
+
+### Getting Started
 
 ```bash
-python mac_overlay_agent.py
+git clone https://github.com/yourname/mini-focus
+cd mini-focus
+python3 mini_focus_openai.py
 ```
 
-An overlay window will appear. Type a simple command such as `open Safari` or
-`new note`. The agent will display the generated AppleScript and attempt to run
-it. The included `nl_to_applescript` function supports only a few basic
-examples, but you can extend it or integrate a language model API for more
-advanced behavior.
+Make sure your `.env` file contains a valid OpenAI API key.
 
-The entry field is automatically focused when the overlay appears, so you can
-start typing right away.
+---
+
+### How It Works
+
+1. **Prompt Input:** You describe what you want.
+2. **Smart Cache:** Reuses previously successful code if matched.
+3. **Code Generation:** GPT‑4o-mini returns a valid Python script.
+4. **Execution:** The script runs live in a subprocess.
+5. **Feedback:** Rate the output. The script is stored to `./success/` or `./fail/`.
+
+---
+
+### Output Folders
+
+* `success/`: Scripts that executed successfully
+* `fail/`: Failed or rejected ones
+* Scripts are saved with timestamped filenames and the original prompt as a header
+
+---
+
+### Developer Notes
+
+* GUI: Native macOS via PyObjC
+* Cache: Fuzzy-matched based on prompt + validated by GPT
+* Feedback: Saves reusable snippets to disk
+
+---
+
+### Revision History
+
+* **2025‑06‑24 a** — Initial GUI code-runner.
+* **2025‑06‑24 b** — Smart cache logic and feedback archive bug-fix.
+* **2025‑06‑24 c** — Fixed GUI button wiring and feedback toggle restore.
+
+---
+
+### To-Do
+
+* [ ] Multi-line prompt support
+* [ ] Custom temperature / model options
+* [ ] Markdown preview for generated code
+
+---
+
+### License
+
+Licensed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0). See `LICENSE` file for full terms.
