@@ -32,6 +32,8 @@ class OverlayAgent(tk.Tk):
         self.entry = tk.Entry(self, bg='black', fg='white', insertbackground='white', font=('Helvetica', 14))
         self.entry.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         self.entry.bind('<Return>', self.process_request)
+        self.entry.focus_set()
+
 
         self.output = tk.Text(self, height=10, bg='black', fg='white', insertbackground='white', font=('Helvetica', 12))
         self.output.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
