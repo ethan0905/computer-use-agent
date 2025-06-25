@@ -1,23 +1,18 @@
 #!/usr/bin/env python3
 """
-mini_focus_openai.py – GPT‑4o‑mini code‑runner with live feedback, smart success cache
-                      + fail‑cache negative examples
+mini_focus_openai.py – GPT‑4o‑mini code‑runner with live retrieval‑augmented few‑shot learning.
 
 Revision history
 ────────────────
-• 2025‑06‑24 a  Initial GUI runner.
-• 2025‑06‑24 b  Semantic cache + feedback archive bug‑fix.
-• 2025‑06‑24 c  FIX: completed GUI button wiring.
-• 2025‑06‑25 d  Fail‑cache now actively prevents repeat mistakes:
-                – fuzzy retrieval from fail/  
-                – top examples passed to GPT as “do‑NOT‑do” context.
+• 2025‑06‑24 d  Fail‑cache prevents repeats; GUI runner.
+• 2025‑06‑25 e  Switched to retrieval‑augmented few‑shot with embeddings for immediate updates.
 """
 
-# ───────────────────────────── imports & API key ─────────────────────────────
 from __future__ import annotations
 
 from dotenv import load_dotenv
-import os, re, sys, subprocess, tempfile, textwrap, datetime, pathlib, difflib, objc
+import os, re, sys, subprocess, tempfile, datetime, pathlib, objc, json
+import numpy as np
 import openai
 from typing import List
 from AppKit import (
@@ -29,21 +24,16 @@ from AppKit import (
 )
 from Foundation import NSObject, NSLog
 
-# Load environment
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise RuntimeError("OPENAI_API_KEY missing – set env var or .env file")
-print(f"API key loaded: {OPENAI_API_KEY[:6]}…")
-
-# ───────────────────────────── OpenAI helpers ────────────────────────────────
 CLIENT = openai.OpenAI(api_key=OPENAI_API_KEY)
-MODEL_ID = "gpt-4o-mini"  # cheapest GPT‑4‑class model (June 2025)
+MODEL_ID = "gpt-4o-mini"
 
 SYSTEM_PROMPT = (
     "You are a macOS automation agent. Always reply ONLY with a complete "
     "runnable Python 3 program, wrapped in a triple-back-tick code block.\n\n"
-    "When generating AppleScript you MUST follow these rules:\n"
     "🛡️ SAFETY & STABILITY RULES\n"
     "1. Never Embed API Keys in AppleScript – credentials stay outside scripts.\n"
     "2. Check App Availability before sending commands; launch the app if needed.\n"
@@ -58,42 +48,66 @@ SYSTEM_PROMPT = (
 )
 
 ROOT_DIR = pathlib.Path(__file__).resolve().parent
+STORE_PATH = ROOT_DIR / "experiences.jsonl"
+
+def get_embedding(text: str, engine: str = "text-embedding-ada-002") -> list[float]:
+    resp = CLIENT.embeddings.create(model=engine, input=[text])
+    return resp.data[0].embedding  # type: ignore
+
+def distances_from_embeddings(target: list[float], others: list[list[float]]) -> list[float]:
+    t = np.array(target)
+    t_norm = np.linalg.norm(t)
+    res = []
+    for vec in others:
+        v = np.array(vec)
+        norm_v = np.linalg.norm(v)
+        if t_norm == 0 or norm_v == 0:
+            res.append(1.0)
+        else:
+            cos = float(np.dot(t, v) / (t_norm * norm_v))
+            res.append(1.0 - cos)
+    return res
+
 (ROOT_DIR / "success").mkdir(exist_ok=True)
 (ROOT_DIR / "fail").mkdir(exist_ok=True)
 
-_slug_rx = re.compile(r"[^a-z0-9]+")
+successes: List[dict] = []
+failures: List[dict] = []
+if STORE_PATH.exists():
+    with open(STORE_PATH, 'r', encoding='utf-8') as f:
+        for line in f:
+            rec = json.loads(line)
+            if rec.get("reward") == 1:
+                successes.append(rec)
+            else:
+                failures.append(rec)
 
-def slugify(text: str) -> str:
-    slug = _slug_rx.sub("-", text.lower()).strip("-")[:60]
-    return slug or "untitled"
+for rec in successes + failures:
+    if "embedding" not in rec:
+        rec["embedding"] = get_embedding(rec["prompt"])
 
-# ─────────────────────────── generation & execution ─────────────────────────
+def generate_python_code(prompt: str) -> str:
+    prompt_emb = get_embedding(prompt)
+    succ_embs = [r["embedding"] for r in successes]
+    succ_dists = distances_from_embeddings(prompt_emb, succ_embs)
+    top_succ = sorted(zip(succ_dists, successes), key=lambda x: x[0])[:3]
+    fail_embs = [r["embedding"] for r in failures]
+    fail_dists = distances_from_embeddings(prompt_emb, fail_embs)
+    top_fail = sorted(zip(fail_dists, failures), key=lambda x: x[0])[:2]
 
-MAX_CANDIDATES = 15
-FUZZY_THRESHOLD = 0.25
-MAX_FAIL_EXAMPLES = 3  # how many negative examples to feed back
+    shots = ""
+    for _, ex in top_succ:
+        shots += f"### Good Example\nUser: {ex['prompt']}\nAssistant:\n```python\n{ex['code']}```\n\n"
+    if top_fail:
+        shots += "### Avoid These Patterns\n"
+        for _, ex in top_fail:
+            shots += f"- {ex['prompt']}\n"
+        shots += "\n"
 
-
-def generate_python_code(user_prompt: str, bad_snippets: List[str] | None = None) -> str:
-    """Generate Python code via GPT‑4o‑mini while telling it what *not* to do."""
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user_prompt},
+        {"role": "user", "content": shots + f"### New Request\n{prompt}"},
     ]
-
-    # Inject negative examples so the model avoids repeating past failures.
-    if bad_snippets:
-        neg_prompt = (
-            "The following Python scripts were previously generated for the *same* "
-            "request but FAILED every test (the user thumbs‑down'ed them). "
-            "Do NOT reuse their logic, structure, or mistakes. Produce a *different* "
-            "implementation that fully satisfies the request.\n\n"
-        )
-        neg_prompt += "\n\n---\n\n".join(
-            f"```python\n{textwrap.dedent(snippet).strip()}\n```" for snippet in bad_snippets
-        )
-        messages.append({"role": "user", "content": neg_prompt})
-
     rsp = CLIENT.chat.completions.create(
         model=MODEL_ID,
         temperature=0.1,
@@ -106,9 +120,7 @@ def generate_python_code(user_prompt: str, bad_snippets: List[str] | None = None
         raise ValueError("Model reply lacked a Python code block:\n" + msg)
     return m.group(1)
 
-
 def run_code(code_text: str) -> bool:
-    """Write *code_text* to a temp file, run it, return True on 0‑exit."""
     with tempfile.NamedTemporaryFile("w+", suffix=".py", delete=False) as tf:
         tf.write(code_text)
         tf.flush()
@@ -123,116 +135,23 @@ def run_code(code_text: str) -> bool:
     finally:
         os.remove(tf_path)
 
-# ───────────────────────────── smart‑cache logic ─────────────────────────────
-
-
-def _list_candidate_files(folder: pathlib.Path, prompt: str):
-    """Return likely matching *.py files from *folder*, ranked by fuzzy ratio."""
-    scored = []
-    for fp in folder.glob("*.py"):
-        try:
-            first_line = fp.read_text(encoding="utf-8", errors="ignore").split("\n", 1)[0]
-        except Exception:
-            continue
-        ratio = difflib.SequenceMatcher(None, prompt.lower(), first_line.lower()).ratio()
-        if ratio >= FUZZY_THRESHOLD:
-            scored.append((ratio, fp))
-    scored.sort(reverse=True)
-    return [fp for _, fp in scored[:MAX_CANDIDATES]]
-
-
-def list_success_candidates(prompt: str):
-    return _list_candidate_files(ROOT_DIR / "success", prompt)
-
-
-def list_fail_candidates(prompt: str):
-    return _list_candidate_files(ROOT_DIR / "fail", prompt)
-
-
-def gpt_confirms_match(prompt: str, code: str) -> bool:
-    """Ask GPT‑4o‑mini if *code* satisfies *prompt*. Strict YES/NO."""
-    try:
-        rsp = CLIENT.chat.completions.create(
-            model=MODEL_ID,
-            temperature=0,
-            max_tokens=4,
-            messages=[
-                {"role": "system", "content": "Answer strictly YES or NO."},
-                {
-                    "role": "user",
-                    "content": (
-                        "Does this Python script fully satisfy the request?\n"\
-                        f"Request: {prompt}\n\nScript (truncated):```python\n{code[:2000]}\n```"
-                    ),
-                },
-            ],
-        )
-        return rsp.choices[0].message.content.strip().upper().startswith("YES")
-    except Exception as exc:
-        NSLog(f"[WARN] match‑check error: {exc}")
-        return False
-
-
-def find_cached_code(prompt: str) -> str | None:
-    for fp in list_success_candidates(prompt):
-        try:
-            code = fp.read_text(encoding="utf-8")
-        except Exception:
-            continue
-        if gpt_confirms_match(prompt, code):
-            NSLog(f"[Cache] Reusing {fp.name}")
-            return code
-    return None
-
-
-def get_fail_snippets(prompt: str, max_examples: int = MAX_FAIL_EXAMPLES) -> List[str]:
-    """Return up to *max_examples* snippets from failed scripts similar to *prompt*."""
-    snippets: List[str] = []
-    for fp in list_fail_candidates(prompt):
-        try:
-            code = fp.read_text(encoding="utf-8")
-        except Exception:
-            continue
-        # Only keep the first ~200 lines to save tokens
-        snippet = "\n".join(code.split("\n")[:200])
-        snippets.append(snippet)
-        if len(snippets) >= max_examples:
-            break
-    return snippets
-
-# ───────────────────────────── Cocoa UI layer ───────────────────────────────
-
 class Delegate(NSObject):
     last_code: str = ""
     last_prompt: str = ""
     last_success: bool = False
 
-    # ---------- button actions ----------
-    def run_(self, _):  # noqa: N802
+    def run_(self, _):
         prompt = self.field.stringValue().strip()
         if not prompt:
             return
 
-        self.last_prompt = prompt  # needed for feedback archiving
+        self.last_prompt = prompt
         self._update_status("Working…")
         self._toggle_feedback(False)
         self.code_view.setString_("")
 
-        # 1️⃣ try success cache
-        cached = find_cached_code(prompt)
-        if cached is not None:
-            self.last_code = cached
-            self.code_view.setString_(cached)
-            ok = run_code(cached)
-            self.last_success = ok
-            self._update_status("✓ Success (cached)" if ok else "✗ Failed (cached)")
-            self._toggle_feedback(True)
-            return
-
-        # 2️⃣ generate new, with fail‑cache negative examples
-        bad_snippets = get_fail_snippets(prompt)
         try:
-            code = generate_python_code(prompt, bad_snippets)
+            code = generate_python_code(prompt)
             self.last_code = code
             self.code_view.setString_(code)
             ok = run_code(code)
@@ -245,16 +164,15 @@ class Delegate(NSObject):
         finally:
             self._toggle_feedback(True)
 
-    def thumbUp_(self, _):  # noqa: N802
+    def thumbUp_(self, _):
         self._save_feedback(True)
 
-    def thumbDown_(self, _):  # noqa: N802
+    def thumbDown_(self, _):
         self._save_feedback(False)
 
-    def exit_(self, _):  # noqa: N802
+    def exit_(self, _):
         NSApplication.sharedApplication().terminate_(None)
 
-    # ---------- internal helpers ----------
     def _update_status(self, text: str):
         self.status_lbl.setStringValue_(text)
 
@@ -267,34 +185,30 @@ class Delegate(NSObject):
             return
         folder = ROOT_DIR / ("success" if success else "fail")
         ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        slug = slugify(self.last_prompt)
+        slug = re.sub(r"[^a-z0-9]+", "-", self.last_prompt.lower()).strip("-")[:60] or "untitled"
         fp = folder / f"{slug}__{ts}.py"
-        header = (
-            f"# Prompt: {self.last_prompt}\n# Outcome: {'success' if success else 'fail'}\n\n"
-        )
+        header = f"# Prompt: {self.last_prompt}\n# Outcome: {'success' if success else 'fail'}\n\n"
         fp.write_text(header + self.last_code, encoding="utf-8")
         NSLog(f"[UI] Saved script to {fp}")
+
+        rec = {"prompt": self.last_prompt, "code": self.last_code, "reward": int(success), "timestamp": datetime.datetime.now().isoformat()}
+        rec["embedding"] = get_embedding(rec["prompt"])
+        (successes if success else failures).append(rec)
+        with open(STORE_PATH, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(rec) + "\n")
+
         self._toggle_feedback(False)
 
-# keep delegate alive
 global GLOBAL_DELEGATE
 GLOBAL_DELEGATE = Delegate.alloc().init()
 
-# ───────────────────────── window construction ──────────────────────────────
-
 def make_window():
-    win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
-        NSMakeRect(0, 0, 640, 440),
-        NSWindowStyleMaskTitled,
-        NSBackingStoreBuffered,
-        False,
-    )
+    win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(NSMakeRect(0, 0, 640, 440), NSWindowStyleMaskTitled, NSBackingStoreBuffered, False)
     win.center()
-    win.setTitle_("GPT‑4o Mini Runner")
+    win.setTitle_("GPT-4o Mini Runner")
 
-    # widgets --------------------------------------------------------------
     field = NSTextField.alloc().initWithFrame_(NSMakeRect(20, 390, 600, 26))
-    field.setPlaceholderString_("Ask GPT‑4o‑mini to do something…")
+    field.setPlaceholderString_("Ask GPT-4o-mini to do something…")
 
     status_lbl = NSTextField.alloc().initWithFrame_(NSMakeRect(20, 360, 600, 20))
     status_lbl.setEditable_(False)
@@ -329,11 +243,9 @@ def make_window():
     exit_btn.setTarget_(GLOBAL_DELEGATE)
     exit_btn.setAction_("exit:")
 
-    # pack into window -----------------------------------------------------
     for v in (field, status_lbl, scroll, run_btn, up_btn, down_btn, exit_btn):
         win.contentView().addSubview_(v)
 
-    # expose widgets to delegate
     GLOBAL_DELEGATE.field = field
     GLOBAL_DELEGATE.status_lbl = status_lbl
     GLOBAL_DELEGATE.code_view = code_view
@@ -344,12 +256,9 @@ def make_window():
     win.makeFirstResponder_(field)
     return win
 
-# ────────────────────────────────── main() ───────────────────────────────────
 if __name__ == "__main__":
     try:
-        NSRunningApplication.currentApplication().activateWithOptions_(
-            NSApplicationActivateIgnoringOtherApps
-        )
+        NSRunningApplication.currentApplication().activateWithOptions_(NSApplicationActivateIgnoringOtherApps)
         app = NSApplication.sharedApplication()
         app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
         make_window()

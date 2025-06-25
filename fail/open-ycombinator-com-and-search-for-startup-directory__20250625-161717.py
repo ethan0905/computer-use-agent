@@ -1,0 +1,27 @@
+# Prompt: open ycombinator.com and search for startup directory
+# Outcome: fail
+
+import webbrowser
+import time
+
+def open_website_and_search(url, query):
+    try:
+        # Open the website
+        webbrowser.open(url)
+        print(f"Opened {url} in the default web browser.")
+        
+        # Wait for the browser to load
+        time.sleep(5)  # This is a simple wait; ideally, we would check for the page load.
+        
+        # Construct the search URL
+        search_url = f"{url}/search?query={query}"
+        
+        # Open the search URL
+        webbrowser.open(search_url)
+        print(f"Searched for '{query}' on {url}.")
+        
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+if __name__ == "__main__":
+    open_website_and_search("https://www.ycombinator.com", "startup directory")
