@@ -55,7 +55,6 @@ SYSTEM_PROMPT = (
     "7. Fall back on UI scripting (System Events) for apps without AppleScript APIs.\n"
     "8. Standardize window-focus logic (set frontmost, activate, etc.).\n"
     "9. Always test for permissions and enablement; detect missing Accessibility rights.\n"
-    ""
 )
 
 ROOT_DIR = pathlib.Path(__file__).resolve().parent
