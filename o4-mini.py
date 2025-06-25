@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
 """
-mini_focus_openai.py – GPT‑4o‑mini code‑runner with live feedback & smart cache
+mini_focus_openai.py – GPT‑4o‑mini code‑runner with live feedback, smart success cache
+                      + fail‑cache negative examples
 
 Revision history
 ────────────────
 • 2025‑06‑24 a  Initial GUI runner.
 • 2025‑06‑24 b  Semantic cache + feedback archive bug‑fix.
-• 2025‑06‑24 c  **FIX:** completed GUI button wiring (previous rev. cut short ⇢
-  SyntaxError). Success/Fail archiving & Exit button fully restored.
+• 2025‑06‑24 c  FIX: completed GUI button wiring.
+• 2025‑06‑25 d  Fail‑cache now actively prevents repeat mistakes:
+                – fuzzy retrieval from fail/  
+                – top examples passed to GPT as “do‑NOT‑do” context.
 """
 
 # ───────────────────────────── imports & API key ─────────────────────────────
+from __future__ import annotations
+
 from dotenv import load_dotenv
 import os, re, sys, subprocess, tempfile, textwrap, datetime, pathlib, difflib, objc
 import openai
+from typing import List
 from AppKit import (
     NSApplication, NSRunningApplication,
     NSApplicationActivationPolicyRegular,
@@ -51,15 +57,36 @@ def slugify(text: str) -> str:
 
 # ─────────────────────────── generation & execution ─────────────────────────
 
-def generate_python_code(user_prompt: str) -> str:
+MAX_CANDIDATES = 15
+FUZZY_THRESHOLD = 0.25
+MAX_FAIL_EXAMPLES = 3  # how many negative examples to feed back
+
+
+def generate_python_code(user_prompt: str, bad_snippets: List[str] | None = None) -> str:
+    """Generate Python code via GPT‑4o‑mini while telling it what *not* to do."""
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
+
+    # Inject negative examples so the model avoids repeating past failures.
+    if bad_snippets:
+        neg_prompt = (
+            "The following Python scripts were previously generated for the *same* "
+            "request but FAILED every test (the user thumbs‑down'ed them). "
+            "Do NOT reuse their logic, structure, or mistakes. Produce a *different* "
+            "implementation that fully satisfies the request.\n\n"
+        )
+        neg_prompt += "\n\n---\n\n".join(
+            f"```python\n{textwrap.dedent(snippet).strip()}\n```" for snippet in bad_snippets
+        )
+        messages.append({"role": "user", "content": neg_prompt})
+
     rsp = CLIENT.chat.completions.create(
         model=MODEL_ID,
         temperature=0.1,
         max_tokens=1024,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ],
+        messages=messages,
     )
     msg = rsp.choices[0].message.content
     m = re.search(r"```(?:python)?\s*(.+?)\s*```", msg, re.DOTALL)
@@ -85,13 +112,12 @@ def run_code(code_text: str) -> bool:
         os.remove(tf_path)
 
 # ───────────────────────────── smart‑cache logic ─────────────────────────────
-MAX_CANDIDATES = 15
-FUZZY_THRESHOLD = 0.25
 
-def list_candidate_files(prompt: str):
-    """Return likely matching *.py files from success/, ranked by fuzzy ratio."""
+
+def _list_candidate_files(folder: pathlib.Path, prompt: str):
+    """Return likely matching *.py files from *folder*, ranked by fuzzy ratio."""
     scored = []
-    for fp in (ROOT_DIR / "success").glob("*.py"):
+    for fp in folder.glob("*.py"):
         try:
             first_line = fp.read_text(encoding="utf-8", errors="ignore").split("\n", 1)[0]
         except Exception:
@@ -101,6 +127,14 @@ def list_candidate_files(prompt: str):
             scored.append((ratio, fp))
     scored.sort(reverse=True)
     return [fp for _, fp in scored[:MAX_CANDIDATES]]
+
+
+def list_success_candidates(prompt: str):
+    return _list_candidate_files(ROOT_DIR / "success", prompt)
+
+
+def list_fail_candidates(prompt: str):
+    return _list_candidate_files(ROOT_DIR / "fail", prompt)
 
 
 def gpt_confirms_match(prompt: str, code: str) -> bool:
@@ -128,7 +162,7 @@ def gpt_confirms_match(prompt: str, code: str) -> bool:
 
 
 def find_cached_code(prompt: str) -> str | None:
-    for fp in list_candidate_files(prompt):
+    for fp in list_success_candidates(prompt):
         try:
             code = fp.read_text(encoding="utf-8")
         except Exception:
@@ -138,7 +172,24 @@ def find_cached_code(prompt: str) -> str | None:
             return code
     return None
 
+
+def get_fail_snippets(prompt: str, max_examples: int = MAX_FAIL_EXAMPLES) -> List[str]:
+    """Return up to *max_examples* snippets from failed scripts similar to *prompt*."""
+    snippets: List[str] = []
+    for fp in list_fail_candidates(prompt):
+        try:
+            code = fp.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        # Only keep the first ~200 lines to save tokens
+        snippet = "\n".join(code.split("\n")[:200])
+        snippets.append(snippet)
+        if len(snippets) >= max_examples:
+            break
+    return snippets
+
 # ───────────────────────────── Cocoa UI layer ───────────────────────────────
+
 class Delegate(NSObject):
     last_code: str = ""
     last_prompt: str = ""
@@ -155,7 +206,7 @@ class Delegate(NSObject):
         self._toggle_feedback(False)
         self.code_view.setString_("")
 
-        # 1️⃣ try cache
+        # 1️⃣ try success cache
         cached = find_cached_code(prompt)
         if cached is not None:
             self.last_code = cached
@@ -166,9 +217,10 @@ class Delegate(NSObject):
             self._toggle_feedback(True)
             return
 
-        # 2️⃣ generate new
+        # 2️⃣ generate new, with fail‑cache negative examples
+        bad_snippets = get_fail_snippets(prompt)
         try:
-            code = generate_python_code(prompt)
+            code = generate_python_code(prompt, bad_snippets)
             self.last_code = code
             self.code_view.setString_(code)
             ok = run_code(code)
@@ -213,6 +265,7 @@ class Delegate(NSObject):
         self._toggle_feedback(False)
 
 # keep delegate alive
+global GLOBAL_DELEGATE
 GLOBAL_DELEGATE = Delegate.alloc().init()
 
 # ───────────────────────── window construction ──────────────────────────────
