@@ -21,8 +21,11 @@ from AppKit import (
     NSApplicationActivateIgnoringOtherApps,
     NSWindow, NSTextField, NSTextView, NSScrollView, NSButton,
     NSWindowStyleMaskTitled, NSBackingStoreBuffered, NSMakeRect,
+    NSSegmentedControl,
 )
 from Foundation import NSObject, NSLog
+import importlib
+import capture
 
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -173,6 +176,42 @@ class Delegate(NSObject):
     def exit_(self, _):
         NSApplication.sharedApplication().terminate_(None)
 
+    def toggleCapture_(self, sender):
+        # Toggle capture mode on/off
+        if not hasattr(self, '_capture_active') or not self._capture_active:
+            capture.CAPTURE_SESSION.start()
+            self._update_status("Capture mode: Recording all clicks and keys…")
+            self._capture_active = True
+        else:
+            capture.CAPTURE_SESSION.stop()
+            applescript = capture.CAPTURE_SESSION.export_applescript()
+            self.last_code = applescript
+            self.last_prompt = "[Captured Flow]"
+            self.code_view.setString_(applescript)
+            self._update_status("Capture stopped. AppleScript generated.")
+            self._capture_active = False
+            self.test_btn.setHidden_(False)
+
+    def testScript_(self, _):
+        # Save AppleScript to temp file and run it
+        import tempfile, subprocess
+        code = self.code_view.string()
+        with tempfile.NamedTemporaryFile("w+", suffix=".applescript", delete=False) as tf:
+            tf.write(code)
+            tf.flush()
+            tf_path = tf.name
+        try:
+            result = subprocess.run(["osascript", tf_path], capture_output=True, text=True)
+            if result.returncode == 0:
+                self._update_status("AppleScript ran successfully. Click 👍 if it worked!")
+            else:
+                self._update_status(f"AppleScript error: {result.stderr.strip()}")
+        except Exception as e:
+            self._update_status(f"Failed to run AppleScript: {e}")
+        finally:
+            os.remove(tf_path)
+        self._toggle_feedback(True)
+
     def _update_status(self, text: str):
         self.status_lbl.setStringValue_(text)
 
@@ -243,7 +282,18 @@ def make_window():
     exit_btn.setTarget_(GLOBAL_DELEGATE)
     exit_btn.setAction_("exit:")
 
-    for v in (field, status_lbl, scroll, run_btn, up_btn, down_btn, exit_btn):
+    capture_btn = NSButton.alloc().initWithFrame_(NSMakeRect(240, 40, 110, 32))
+    capture_btn.setTitle_("Capture")
+    capture_btn.setTarget_(GLOBAL_DELEGATE)
+    capture_btn.setAction_("toggleCapture:")
+
+    test_btn = NSButton.alloc().initWithFrame_(NSMakeRect(360, 10, 100, 26))
+    test_btn.setTitle_("Test it")
+    test_btn.setTarget_(GLOBAL_DELEGATE)
+    test_btn.setAction_("testScript:")
+    test_btn.setHidden_(True)
+
+    for v in (field, status_lbl, scroll, run_btn, up_btn, down_btn, exit_btn, capture_btn, test_btn):
         win.contentView().addSubview_(v)
 
     GLOBAL_DELEGATE.field = field
@@ -251,6 +301,7 @@ def make_window():
     GLOBAL_DELEGATE.code_view = code_view
     GLOBAL_DELEGATE.up_btn = up_btn
     GLOBAL_DELEGATE.down_btn = down_btn
+    GLOBAL_DELEGATE.test_btn = test_btn
 
     win.makeKeyAndOrderFront_(None)
     win.makeFirstResponder_(field)
