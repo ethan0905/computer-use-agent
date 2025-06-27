@@ -5,6 +5,44 @@ Writes events to a JSONL file until interrupted (Ctrl+C or SIGTERM).
 import sys, json, datetime, signal
 from pynput import mouse, keyboard
 
+# Add AppKit/Quartz for app/window detection
+try:
+    from AppKit import NSWorkspace
+    import Quartz
+except ImportError:
+    NSWorkspace = None
+    Quartz = None
+
+def get_active_app_window():
+    app_name = None
+    window_title = None
+    try:
+        if NSWorkspace:
+            app = NSWorkspace.sharedWorkspace().frontmostApplication()
+            app_name = app.localizedName()
+        if Quartz:
+            windows = Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID)
+            pid = app.processIdentifier() if app_name and app else None
+            if pid:
+                for w in windows:
+                    if w.get('kCGWindowOwnerPID') == pid and w.get('kCGWindowName'):
+                        window_title = w['kCGWindowName']
+                        break
+    except Exception:
+        pass
+    return app_name, window_title
+
+def classify_support(app):
+    if not app:
+        return "unknown"
+    app_l = app.lower()
+    if app_l in ["safari", "google chrome", "arc", "firefox", "microsoft edge"]:
+        return "internet research"
+    elif app_l in ["notes", "notion", "obsidian", "bear"]:
+        return "note app"
+    else:
+        return app_l
+
 if len(sys.argv) < 2:
     print("Usage: python capture_worker.py <output_file.jsonl>")
     sys.exit(1)
@@ -14,6 +52,13 @@ events = []
 running = True
 
 def record_event(event):
+    # Enrich event with app/window/support at capture time
+    app, win = get_active_app_window()
+    if app:
+        event['app'] = app
+    if win:
+        event['window'] = win
+    event['support'] = classify_support(app)
     with open(output_path, 'a', encoding='utf-8') as f:
         f.write(json.dumps(event) + '\n')
 

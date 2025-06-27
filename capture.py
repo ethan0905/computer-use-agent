@@ -13,6 +13,33 @@ from threading import Thread
 import sys
 import subprocess, tempfile, json
 
+try:
+    from AppKit import NSWorkspace
+    import Quartz
+except ImportError:
+    NSWorkspace = None
+    Quartz = None
+
+def get_active_app_window():
+    """Return (app_name, window_title) of the frontmost app/window, or (None, None) if unavailable."""
+    app_name = None
+    window_title = None
+    try:
+        if NSWorkspace:
+            app = NSWorkspace.sharedWorkspace().frontmostApplication()
+            app_name = app.localizedName()
+        if Quartz:
+            windows = Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID)
+            pid = app.processIdentifier() if app_name and app else None
+            if pid:
+                for w in windows:
+                    if w.get('kCGWindowOwnerPID') == pid and w.get('kCGWindowName'):
+                        window_title = w['kCGWindowName']
+                        break
+    except Exception:
+        pass
+    return app_name, window_title
+
 class CaptureSession:
     def __init__(self):
         self.events: List[Dict[str, Any]] = []
@@ -47,13 +74,35 @@ class CaptureSession:
             try:
                 with open(self._events_file, 'r', encoding='utf-8') as f:
                     for line in f:
-                        self.events.append(json.loads(line))
+                        event = json.loads(line)
+                        self.events.append(event)
             except Exception as e:
                 print(f"[Capture] Failed to read events: {e}")
         print(f"[Capture] Stopped. {len(self.events)} events captured.")
+        # Print captured events to terminal
+        print("[Capture] Event log:")
+        for e in self.events:
+            print(e)
 
     def record_event(self, event: Dict[str, Any]):
         if self.active:
+            app, win = get_active_app_window()
+            if app:
+                event['app'] = app
+            if win:
+                event['window'] = win
+            # Set 'support' variable based on app/window context
+            support = None
+            if app:
+                if app.lower() in ["safari", "google chrome", "arc", "firefox", "microsoft edge"]:
+                    support = "internet research"
+                elif app.lower() in ["notes", "notion", "obsidian", "bear"]:
+                    support = "note app"
+                else:
+                    support = app.lower()
+            else:
+                support = "unknown"
+            event['support'] = support
             self.events.append(event)
 
     def _on_click(self, x, y, button, pressed):
@@ -81,11 +130,20 @@ class CaptureSession:
             k = key.char
         except AttributeError:
             k = str(key)
-        self.record_event({
+        # Detect if the key is pressed in a browser search field (very basic heuristic)
+        # You can improve this by capturing window/app context if needed
+        event = {
             'type': 'key_press',
             'key': k,
             'timestamp': datetime.datetime.now().isoformat()
-        })
+        }
+        # Heuristic: if the last mouse click was in a browser window, mark as 'internet_research_input'
+        if self.events:
+            last = self.events[-1]
+            if last['type'] == 'mouse_click' and last.get('button') == 'Button.left' and last.get('pressed'):
+                # Optionally, you could check coordinates or add more logic here
+                event['context'] = 'possible_internet_research_input'
+        self.record_event(event)
 
     def _on_release(self, key):
         try:
@@ -99,22 +157,44 @@ class CaptureSession:
         })
 
     def export_applescript(self) -> str:
-        # Use OpenAI 4o-mini to convert captured events to AppleScript
+        # Use OpenAI 4o-mini to convert captured events to AppleScript, following custom rules and example
         import openai, os
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             return "-- ERROR: OPENAI_API_KEY not set."
         CLIENT = openai.OpenAI(api_key=api_key)
+        # Read rules and example
+        try:
+            with open("capture-rules.txt", "r", encoding="utf-8") as f:
+                rules = f.read()
+        except Exception:
+            rules = ""
+        try:
+            with open("working.applescript", "r", encoding="utf-8") as f:
+                example = f.read()
+        except Exception:
+            example = ""
         prompt = (
-            "Convert the following macOS mouse and keyboard event log into a complete, runnable AppleScript that will reproduce the actions. "
-            "Use System Events for mouse and keyboard automation. Only output the AppleScript code.\n\n"
-            f"EVENT LOG (JSONL):\n" + '\n'.join([json.dumps(e) for e in self.events])
+            f"You are an expert in macOS automation.\n"
+            f"ALWAYS strictly follow these rules for generating AppleScript with cliclick, and use the following working script as a template.\n"
+            f"\nRULES:\n{rules}\n"
+            f"\nWORKING EXAMPLE:\n\n{example}\n"
+            "\n\n---\n\nNow, convert the following macOS mouse and keyboard event log into a complete, runnable AppleScript that will reproduce the actions. "
+            "The output MUST:\n"
+            "- Use the same structure, banners, and helper handler as the example.\n"
+            "- Put all coordinates and delays in a user-tunable block as properties.\n"
+            "- Use cliclick for all mouse clicks, and System Events for keystrokes.\n"
+            "- Add comments for each step.\n"
+            "- Never use hard-coded paths or magic numbers outside the user-tunable block.\n"
+            "- Abort early if cliclick is not found.\n"
+            "- Only output the AppleScript code, nothing else.\n"
+            f"\n\nEVENT LOG (JSONL):\n" + '\n'.join([json.dumps(e) for e in self.events])
         )
         try:
             rsp = CLIENT.chat.completions.create(
                 model="gpt-4o-mini",
                 temperature=0.1,
-                max_tokens=512,
+                max_tokens=2048,
                 messages=[
                     {"role": "system", "content": "You are an expert in macOS AppleScript automation."},
                     {"role": "user", "content": prompt}

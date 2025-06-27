@@ -1,0 +1,33 @@
+### 10-Rule “Prompt System” for generating macOS **cliclick + AppleScript** flows
+
+1. **Locate `cliclick`**
+   `/opt/homebrew/bin` → fallback `/usr/local/bin`; store in `property cli`.
+
+2. **Abort-early dialog** if `cli` is still `missing value`.
+
+3. **Declare variables**
+   `property cli …` at top; add `global cli` inside every handler.
+
+4. **Helper**
+
+   ```applescript
+   on clickAt({x,y}, pause)
+       global cli
+       do shell script cli & " c:" & x & "," & y
+       delay pause
+   end clickAt
+   ```
+
+5. **User-tunable block**
+   Coordinates (`step1Pos`, …) + `pageLoadDelay` exposed as properties.
+
+6. **One-shot typing** – use `keystroke "full string"` and `key code 36` for Return.
+
+7. **Open URL** via `do shell script "open https://…"`, then `delay pageLoadDelay`.
+
+8. **Main flow** = series of `clickAt()` and `keystroke` calls; keep it readable.
+
+9. **Comments banner** at top: title, purpose, install note (`brew install cliclick`), and Accessibility/Input-Monitoring reminder.
+
+10. **No hard-coded PATHs elsewhere**; all clicks/timeouts adjustable via properties only.
+
