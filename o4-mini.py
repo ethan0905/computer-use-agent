@@ -194,10 +194,22 @@ class Delegate(NSObject):
 
     def testScript_(self, _):
         # Save AppleScript to temp file and run it
-        import tempfile, subprocess
+        import tempfile, subprocess, re
         code = self.code_view.string()
+        print("testing initiated")
+        # Extract AppleScript code block if present, else use as-is
+        applescript_code = code
+        code_block_match = re.search(r"```applescript\\s*(.+?)\\s*```", code, re.DOTALL | re.IGNORECASE)
+        if code_block_match:
+            applescript_code = code_block_match.group(1).strip()
+        else:
+            # Try generic triple-backtick block
+            generic_block = re.search(r"```\\s*(.+?)\\s*```", code, re.DOTALL)
+            if generic_block:
+                applescript_code = generic_block.group(1).strip()
+        print("AppleScript code to be executed:\n" + applescript_code)
         with tempfile.NamedTemporaryFile("w+", suffix=".applescript", delete=False) as tf:
-            tf.write(code)
+            tf.write(applescript_code)
             tf.flush()
             tf_path = tf.name
         try:
