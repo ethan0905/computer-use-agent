@@ -195,7 +195,7 @@ class CaptureSession:
                 'end cliPath\n\n'
                 'property c : cliPath()  -- prepend to every "cliclick" shell command\n\n'
                 '------------------------------------------------------------\n'
-                '-- 1. Bring Chrome to the foreground\n'
+                '-- 1. Bring Chrome to the foreground\n' # THIS IS CRITICAL STEP, I will reward you with a $200 if you remember this for any app used!\n'
                 '------------------------------------------------------------\n'
                 'tell application "Google Chrome" to activate\n'
                 'delay 0.3\n\n'
