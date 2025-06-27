@@ -1,6 +1,6 @@
 # Computer Use Agent for MacOS
 
-Computer use agent that runs on MacOS under GPT-4o-mini, with smart cache system, and embedded inside a python app.
+Computer use agent that runs on MacOS under GPT-4o-mini, with smart cache system, and embedded inside a python app. Please drop a star to support my work ⭐️
 
 ### Features
 
