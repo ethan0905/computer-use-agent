@@ -1,0 +1,4 @@
+open perplexity.ai
+move mouse cursor to [pos x][pos y] and click on "discover"
+move mouse cursor to [pos x][pos y] and click on "article"
+end
