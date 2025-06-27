@@ -21,6 +21,7 @@ Computer use agent that runs on MacOS under GPT-4o-mini, with smart cache system
 * macOS
 * Python 3.8+
 * `pip install openai python-dotenv pyobjc`
+* `brew install cliclick`
 * `.env` file with:
 
   ```
