@@ -266,12 +266,16 @@ class CaptureSession:
                 ],
             )
             msg = rsp.choices[0].message.content
-            # Extract AppleScript code block if present
+            # Remove all triple-backtick and 'applescript' markers from the output
             import re
-            m = re.search(r"```applescript\\s*(.+?)\\s*```", msg, re.DOTALL)
-            if m:
-                return m.group(1)
-            return msg.strip()
+            code = msg
+            # Remove ```applescript ... ``` blocks
+            code = re.sub(r"```applescript\\s*", "", code, flags=re.IGNORECASE)
+            # Remove generic triple-backtick blocks
+            code = re.sub(r"```", "", code)
+            # Remove any leading/trailing whitespace
+            code = code.strip()
+            return code
         except Exception as e:
             return f"-- ERROR: {e}"
 
