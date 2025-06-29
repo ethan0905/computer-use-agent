@@ -31,9 +31,9 @@ Computer use agent that runs on MacOS under GPT-4o-mini, with smart cache system
 ### Getting Started
 
 ```bash
-git clone https://github.com/yourname/mini-focus
-cd mini-focus
-python3 mini_focus_openai.py
+git clone https://github.com/yourname/computer-use-agent
+cd computer-use-agent
+python3 computer-use-agent.py
 ```
 
 Make sure your `.env` file contains a valid OpenAI API key.
@@ -69,6 +69,8 @@ Make sure your `.env` file contains a valid OpenAI API key.
 * — Capture mode
 * — Fix capture mode datas stored
 * — Fix codegen prompt + format for auto exec
+* - Regenerate
+  - Save-as-prompt
 
 ### To-Do
 
