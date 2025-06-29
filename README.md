@@ -75,3 +75,4 @@ Make sure your `.env` file contains a valid OpenAI API key.
 ### To-Do
 
 * [ ] Add regenerate code button (capture mode)
+* [ ] Add rule for codegen to open new window consistency
