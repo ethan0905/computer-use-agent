@@ -9,6 +9,353 @@ import datetime
 from config import ROOT_DIR
 
 class Delegate(NSObject):
+    def decompose_(self, _):
+        from complex import decompose_request
+        from AppKit import NSWindow, NSButton, NSTextField, NSMakeRect, NSWindowStyleMaskTitled, NSBackingStoreBuffered
+        prompt = self.field.stringValue().strip()
+        if not prompt:
+            return
+        self._update_status("Decomposing…")
+        steps = decompose_request(prompt)
+        self._step_descriptions = steps
+        self._step_codes = [generate_python_code(s) for s in steps]
+        self._step_valid = [False] * len(steps)
+        # Main complex task window
+        win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(NSMakeRect(120, 120, 700, 120 + 40*len(steps)), NSWindowStyleMaskTitled, NSBackingStoreBuffered, False)
+        win.setTitle_("Complex Task!")
+        y = 60 + 40 * (len(steps)-1)
+        self._step_test_btns = []
+        self._step_validate_btns = []
+        self._step_regen_btns = []
+        for idx, desc in enumerate(steps):
+            label = NSTextField.alloc().initWithFrame_(NSMakeRect(20, y, 400, 24))
+            label.setStringValue_(f"Step {idx+1}: {desc}")
+            label.setBezeled_(False)
+            label.setDrawsBackground_(False)
+            label.setEditable_(False)
+            label.setSelectable_(False)
+            win.contentView().addSubview_(label)
+            # Right-aligned buttons
+            test_btn = NSButton.alloc().initWithFrame_(NSMakeRect(440, y, 70, 24))
+            test_btn.setTitle_("Test")
+            test_btn.setTag_(idx)
+            test_btn.setTarget_(self)
+            test_btn.setAction_("testStepInList:")
+            regen_btn = NSButton.alloc().initWithFrame_(NSMakeRect(515, y, 90, 24))
+            regen_btn.setTitle_("Regenerate")
+            regen_btn.setTag_(idx)
+            regen_btn.setTarget_(self)
+            regen_btn.setAction_("regenerateStepInList:")
+            validate_btn = NSButton.alloc().initWithFrame_(NSMakeRect(610, y, 80, 24))
+            validate_btn.setTitle_("Validate")
+            validate_btn.setTag_(idx)
+            validate_btn.setTarget_(self)
+            validate_btn.setAction_("validateStepInList:")
+            win.contentView().addSubview_(test_btn)
+            win.contentView().addSubview_(regen_btn)
+            win.contentView().addSubview_(validate_btn)
+            self._step_test_btns.append(test_btn)
+            self._step_validate_btns.append(validate_btn)
+            self._step_regen_btns.append(regen_btn)
+            y -= 40
+        # Prompt display
+        prompt_label = NSTextField.alloc().initWithFrame_(NSMakeRect(20, 20, 660, 24))
+        prompt_label.setStringValue_(f'Prompt: "{prompt}"')
+        prompt_label.setBezeled_(False)
+        prompt_label.setDrawsBackground_(False)
+        prompt_label.setEditable_(False)
+        prompt_label.setSelectable_(False)
+        win.contentView().addSubview_(prompt_label)
+        # Go back to menu button
+        back_btn = NSButton.alloc().initWithFrame_(NSMakeRect(20, 5, 140, 28))
+        back_btn.setTitle_("Go back to menu")
+        back_btn.setTarget_(self)
+        back_btn.setAction_("closeStepList:")
+        win.contentView().addSubview_(back_btn)
+        # Test all button
+        test_all_btn = NSButton.alloc().initWithFrame_(NSMakeRect(370, 5, 100, 28))
+        test_all_btn.setTitle_("Test all")
+        test_all_btn.setTarget_(self)
+        test_all_btn.setAction_("testAllSteps:")
+        win.contentView().addSubview_(test_all_btn)
+        # Validate all button
+        validate_all_btn = NSButton.alloc().initWithFrame_(NSMakeRect(480, 5, 120, 28))
+        validate_all_btn.setTitle_("Validate All")
+        validate_all_btn.setTarget_(self)
+        validate_all_btn.setAction_("validateAllSteps:")
+        win.contentView().addSubview_(validate_all_btn)
+        self._step_list_win = win
+        win.makeKeyAndOrderFront_(None)
+
+    def testStepInList_(self, sender):
+        idx = sender.tag()
+        code = self._step_codes[idx]
+        try:
+            ok = run_code(code)
+            self._update_status(f"Step {idx+1} test: {'Success' if ok else 'Failed'}")
+        except Exception as exc:
+            self._update_status(f"Step {idx+1} test failed: {exc}")
+
+    def validateStepInList_(self, sender):
+        idx = sender.tag()
+        self._step_valid[idx] = True
+        self._update_status(f"Step {idx+1} validated.")
+
+    def regenerateStepInList_(self, sender):
+        idx = sender.tag()
+        desc = self._step_descriptions[idx]
+        code = generate_python_code(desc)
+        self._step_codes[idx] = code
+        self._update_status(f"Step {idx+1} regenerated.")
+
+    def testAllSteps_(self, _):
+        for idx, code in enumerate(self._step_codes):
+            try:
+                ok = run_code(code)
+                self._update_status(f"Step {idx+1} test: {'Success' if ok else 'Failed'}")
+            except Exception as exc:
+                self._update_status(f"Step {idx+1} test failed: {exc}")
+
+    def validateAllSteps_(self, _):
+        if all(self._step_valid):
+            full_code = '\n\n'.join(self._step_codes)
+            save_flow(self.field.stringValue().strip(), full_code, 1, "success")
+            self._update_status("All steps validated and full flow stored as success!")
+            self._step_list_win.close()
+        else:
+            self._update_status("Please validate each step before storing.")
+
+    def closeStepList_(self, _):
+        if hasattr(self, '_step_list_win') and self._step_list_win:
+            self._step_list_win.close()
+
+    def testStepInList_(self, sender):
+        idx = sender.tag()
+        code = self._step_codes[idx]
+        try:
+            ok = run_code(code)
+            self._update_status(f"Step {idx+1} test: {'Success' if ok else 'Failed'}")
+        except Exception as exc:
+            self._update_status(f"Step {idx+1} test failed: {exc}")
+
+    def validateStepInList_(self, sender):
+        idx = sender.tag()
+        self._step_valid[idx] = True
+        self._update_status(f"Step {idx+1} validated.")
+
+    def regenerateStepInList_(self, sender):
+        idx = sender.tag()
+        desc = self._step_descriptions[idx]
+        code = generate_python_code(desc)
+        self._step_codes[idx] = code
+        self._update_status(f"Step {idx+1} regenerated.")
+
+    def testAllSteps_(self, _):
+        for idx, code in enumerate(self._step_codes):
+            try:
+                ok = run_code(code)
+                self._update_status(f"Step {idx+1} test: {'Success' if ok else 'Failed'}")
+            except Exception as exc:
+                self._update_status(f"Step {idx+1} test failed: {exc}")
+
+    def validateAllSteps_(self, _):
+        if all(self._step_valid):
+            full_code = '\n\n'.join(self._step_codes)
+            save_flow(self.field.stringValue().strip(), full_code, 1, "success")
+            self._update_status("All steps validated and full flow stored as success!")
+            self._step_list_win.close()
+        else:
+            self._update_status("Please validate each step before storing.")
+
+    def closeStepList_(self, _):
+        if hasattr(self, '_step_list_win') and self._step_list_win:
+            self._step_list_win.close()
+
+    def testStepInList_(self, sender):
+        idx = sender.tag()
+        code = self._step_code_cache[idx]
+        try:
+            ok = run_code(code)
+            self._update_status(f"Step {idx+1} test: {'Success' if ok else 'Failed'}")
+        except Exception as exc:
+            self._update_status(f"Step {idx+1} test failed: {exc}")
+
+    def validateStepInList_(self, sender):
+        idx = sender.tag()
+        self._step_valid[idx] = True
+        self._update_status(f"Step {idx+1} validated.")
+
+    def regenerateStepInList_(self, sender):
+        idx = sender.tag()
+        desc = self._step_descriptions[idx]
+        code = generate_python_code(desc)
+        self._step_code_cache[idx] = code
+        self._update_status(f"Step {idx+1} regenerated.")
+
+    def testAllSteps_(self, _):
+        for idx, code in enumerate(self._step_code_cache):
+            try:
+                ok = run_code(code)
+                self._update_status(f"Step {idx+1} test: {'Success' if ok else 'Failed'}")
+            except Exception as exc:
+                self._update_status(f"Step {idx+1} test failed: {exc}")
+
+    def validateAllSteps_(self, _):
+        if all(self._step_valid):
+            full_code = '\n\n'.join(self._step_code_cache)
+            save_flow(self.field.stringValue().strip(), full_code, 1, "success")
+            self._update_status("All steps validated and full flow stored as success!")
+            self._step_list_win.close()
+        else:
+            self._update_status("Please validate each step before storing.")
+
+    def closeStepList_(self, _):
+        if hasattr(self, '_step_list_win') and self._step_list_win:
+            self._step_list_win.close()
+
+    def testStepInList_(self, sender):
+        idx = sender.tag()
+        code_view = self._step_code_views[idx]
+        code = code_view.string()
+        self._step_codes[idx] = code
+        try:
+            ok = run_code(code)
+            self._update_status(f"Step {idx+1} test: {'Success' if ok else 'Failed'}")
+        except Exception as exc:
+            self._update_status(f"Step {idx+1} test failed: {exc}")
+
+    def validateStepInList_(self, sender):
+        idx = sender.tag()
+        code_view = self._step_code_views[idx]
+        code = code_view.string()
+        self._step_codes[idx] = code
+        self._step_valid[idx] = True
+        self._update_status(f"Step {idx+1} validated.")
+
+    def regenerateStepInList_(self, sender):
+        idx = sender.tag()
+        desc = self._step_descriptions[idx]
+        code = generate_python_code(desc)
+        self._step_codes[idx] = code
+        self._step_code_views[idx].setString_(code)
+        self._update_status(f"Step {idx+1} regenerated.")
+
+    def testAllSteps_(self, _):
+        for idx, code_view in enumerate(self._step_code_views):
+            code = code_view.string()
+            self._step_codes[idx] = code
+            try:
+                ok = run_code(code)
+                self._update_status(f"Step {idx+1} test: {'Success' if ok else 'Failed'}")
+            except Exception as exc:
+                self._update_status(f"Step {idx+1} test failed: {exc}")
+
+    def validateAllSteps_(self, _):
+        if all(self._step_valid):
+            full_code = '\n\n'.join(self._step_codes)
+            save_flow(self.field.stringValue().strip(), full_code, 1, "success")
+            self._update_status("All steps validated and full flow stored as success!")
+            self._step_list_win.close()
+        else:
+            self._update_status("Please validate each step before storing.")
+
+    def closeStepList_(self, _):
+        if hasattr(self, '_step_list_win') and self._step_list_win:
+            self._step_list_win.close()
+
+    def testStepInList_(self, sender):
+        idx = sender.tag()
+        code_view = self._step_code_views[idx]
+        code_view.setHidden_(False)
+        code = code_view.string()
+        self._step_codes[idx] = code
+        try:
+            ok = run_code(code)
+            self._update_status(f"Step {idx+1} test: {'Success' if ok else 'Failed'}")
+        except Exception as exc:
+            self._update_status(f"Step {idx+1} test failed: {exc}")
+
+    def validateStepInList_(self, sender):
+        idx = sender.tag()
+        code_view = self._step_code_views[idx]
+        code_view.setHidden_(False)
+        code = code_view.string()
+        self._step_codes[idx] = code
+        self._step_valid[idx] = True
+        self._update_status(f"Step {idx+1} validated.")
+
+    def testAllSteps_(self, _):
+        for idx, code_view in enumerate(self._step_code_views):
+            code_view.setHidden_(False)
+            code = code_view.string()
+            self._step_codes[idx] = code
+            try:
+                ok = run_code(code)
+                self._update_status(f"Step {idx+1} test: {'Success' if ok else 'Failed'}")
+            except Exception as exc:
+                self._update_status(f"Step {idx+1} test failed: {exc}")
+
+    def validateAllSteps_(self, _):
+        if all(self._step_valid):
+            full_code = '\n\n'.join(self._step_codes)
+            save_flow(self.field.stringValue().strip(), full_code, 1, "success")
+            self._update_status("All steps validated and full flow stored as success!")
+            self._step_list_win.close()
+        else:
+            self._update_status("Please validate each step before storing.")
+
+    def closeStepList_(self, _):
+        if hasattr(self, '_step_list_win') and self._step_list_win:
+            self._step_list_win.close()
+
+    def _show_step_editor(self, idx):
+        from AppKit import NSWindow, NSTextView, NSButton, NSMakeRect, NSWindowStyleMaskTitled, NSBackingStoreBuffered
+        if hasattr(self, '_step_win') and self._step_win:
+            self._step_win.close()
+        win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(NSMakeRect(150, 150, 700, 400), NSWindowStyleMaskTitled, NSBackingStoreBuffered, False)
+        win.setTitle_(f"Step {idx+1} of {len(self._step_descriptions)}: Edit, Test, Validate")
+        code_view = NSTextView.alloc().initWithFrame_(NSMakeRect(20, 80, 660, 260))
+        code_view.setString_(self._step_codes[idx])
+        code_view.setEditable_(True)
+        test_btn = NSButton.alloc().initWithFrame_(NSMakeRect(20, 30, 120, 32))
+        test_btn.setTitle_("Test Step")
+        test_btn.setTarget_(self)
+        test_btn.setAction_("testStep:")
+        validate_btn = NSButton.alloc().initWithFrame_(NSMakeRect(160, 30, 120, 32))
+        validate_btn.setTitle_("Validate Step")
+        validate_btn.setTarget_(self)
+        validate_btn.setAction_("validateStep:")
+        win.contentView().addSubview_(code_view)
+        win.contentView().addSubview_(test_btn)
+        win.contentView().addSubview_(validate_btn)
+        self._step_win = win
+        self._step_code_view = code_view
+        win.makeKeyAndOrderFront_(None)
+
+    def testStep_(self, _):
+        idx = self._step_idx
+        code = self._step_code_view.string()
+        self._step_codes[idx] = code
+        try:
+            ok = run_code(code)
+            self._update_status(f"Step {idx+1} test: {'Success' if ok else 'Failed'}")
+        except Exception as exc:
+            self._update_status(f"Step {idx+1} test failed: {exc}")
+
+    def validateStep_(self, _):
+        idx = self._step_idx
+        code = self._step_code_view.string()
+        self._step_codes[idx] = code
+        self._step_valid[idx] = True
+        if idx + 1 < len(self._step_descriptions):
+            self._step_idx += 1
+            self._show_step_editor(self._step_idx)
+        else:
+            # All steps validated, store the flow
+            full_code = '\n\n'.join(self._step_codes)
+            save_flow(self.field.stringValue().strip(), full_code, 1, "success")
+            self._update_status("All steps validated and full flow stored as success!")
+            self._step_win.close()
     def showHistory_(self, _):
         from AppKit import NSWindow, NSScrollView, NSTextView, NSButton, NSTextField, NSMakeRect, NSWindowStyleMaskTitled, NSBackingStoreBuffered
         from storage import load_cache
@@ -152,22 +499,74 @@ class Delegate(NSObject):
         self.code_view.setString_("")
         # --- SMART CACHE LOGIC ---
         from storage import load_cache
+        from embeddings import get_embedding, distances_from_embeddings
+        import numpy as np
         successes, _ = load_cache()
-        for rec in successes:
-            if rec["prompt"].strip().lower() == prompt.strip().lower():
-                self._load_cached_script(rec["code"], rec["prompt"])
-                self._applescript_tag = 'cache'
-                # Automatically run the cached code
-                try:
-                    ok = run_code(rec["code"])
-                    self.last_success = ok
-                    self._update_status("✓ Success (from smart cache)" if ok else "✗ Failed (from smart cache)")
-                except Exception as exc:
-                    self.last_success = False
-                    self._update_status(f"✗ Failed (from smart cache): {exc}")
-                    NSLog(f"[ERROR] {exc!r}")
-                self._toggle_feedback(True)
-                return
+        # Fuzzy matching using embedding similarity
+        prompt_emb = get_embedding(prompt)
+        succ_embs = [rec["embedding"] for rec in successes if rec.get("embedding")]
+        if succ_embs:
+            dists = distances_from_embeddings(prompt_emb, succ_embs)
+            min_idx = int(np.argmin(dists))
+            min_dist = dists[min_idx]
+            # Threshold for fuzzy match (tune as needed, e.g. 0.15)
+            if min_dist < 0.18:
+                rec = successes[min_idx]
+                # Improved parameterization with debug/status output
+                import re
+                code = rec["code"]
+                def extract_params(text):
+                    # Extract quoted substrings (messages)
+                    quoted = re.findall(r"'([^']*)'|\"([^\"]*)\"", text)
+                    flat = [q for pair in quoted for q in pair if q]
+                    # Extract names after 'to' (e.g., to John Doe)
+                    names = re.findall(r"to ([A-Za-z0-9_ ]+)", text)
+                    # Extract numbers (e.g., +1234567890)
+                    numbers = re.findall(r"\+\d{6,15}", text)
+                    return flat, names, numbers
+                old_msg, old_names, old_numbers = extract_params(rec["prompt"])
+                new_msg, new_names, new_numbers = extract_params(prompt)
+                debug_lines = []
+                debug_lines.append(f"[DEBUG] Fuzzy match: {rec['prompt']} (dist={min_dist:.3f})")
+                debug_lines.append(f"[DEBUG] Old msg: {old_msg}, New msg: {new_msg}")
+                debug_lines.append(f"[DEBUG] Old names: {old_names}, New names: {new_names}")
+                debug_lines.append(f"[DEBUG] Old numbers: {old_numbers}, New numbers: {new_numbers}")
+                # Replace all old messages with new messages (if same count)
+                if old_msg and new_msg and len(old_msg) == len(new_msg):
+                    for o, n in zip(old_msg, new_msg):
+                        if o in code:
+                            code = code.replace(o, n)
+                            debug_lines.append(f"[DEBUG] Replaced message: '{o}' -> '{n}'")
+                # Replace all old names with new names (if same count)
+                if old_names and new_names and len(old_names) == len(new_names):
+                    for o, n in zip(old_names, new_names):
+                        if o in code:
+                            code = re.sub(re.escape(o), n, code, count=1)
+                            debug_lines.append(f"[DEBUG] Replaced name: '{o}' -> '{n}'")
+                # Replace all old numbers with new numbers (if same count)
+                if old_numbers and new_numbers and len(old_numbers) == len(new_numbers):
+                    for o, n in zip(old_numbers, new_numbers):
+                        if o in code:
+                            code = code.replace(o, n)
+                            debug_lines.append(f"[DEBUG] Replaced number: '{o}' -> '{n}'")
+                # If no replacements were made, or code is unchanged, fall back to generation
+                if code == rec["code"]:
+                    debug_lines.append("[DEBUG] No parameterization possible, falling back to code generation.")
+                    self._update_status("\n".join(debug_lines))
+                else:
+                    self._load_cached_script(code, prompt)
+                    self._applescript_tag = 'cache'
+                    self._update_status("\n".join(debug_lines))
+                    try:
+                        ok = run_code(code)
+                        self.last_success = ok
+                        self._update_status("\n".join(debug_lines+["✓ Success (from smart cache, fuzzy match)" if ok else "✗ Failed (from smart cache, fuzzy match)"]))
+                    except Exception as exc:
+                        self.last_success = False
+                        self._update_status("\n".join(debug_lines+[f"✗ Failed (from smart cache, fuzzy match): {exc}"]))
+                        NSLog(f"[ERROR] {exc!r}")
+                    self._toggle_feedback(True)
+                    return
         # --- END SMART CACHE LOGIC ---
         try:
             code = generate_python_code(prompt)

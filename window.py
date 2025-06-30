@@ -8,6 +8,11 @@ global GLOBAL_DELEGATE
 GLOBAL_DELEGATE = Delegate.alloc().init()
 
 def make_window():
+    # Add Decompose button
+    step_btn = NSButton.alloc().initWithFrame_(NSMakeRect(250, 10, 120, 26))
+    step_btn.setTitle_("Decompose")
+    step_btn.setTarget_(GLOBAL_DELEGATE)
+    step_btn.setAction_("decompose:")
     # Add History button
     history_btn = NSButton.alloc().initWithFrame_(NSMakeRect(140, 40, 90, 32))
     history_btn.setTitle_("History")
@@ -84,8 +89,9 @@ def make_window():
     save_prompt_btn.setAction_("saveCapturedFlow:")
     save_prompt_btn.setHidden_(True)
 
-    for v in (field, status_lbl, scroll, run_btn, up_btn, down_btn, exit_btn, capture_btn, history_btn, test_btn, regenerate_btn, save_prompt_field, save_prompt_btn, regenerate_captured_btn):
+    for v in (field, status_lbl, scroll, run_btn, up_btn, down_btn, exit_btn, capture_btn, history_btn, step_btn, test_btn, regenerate_btn, save_prompt_field, save_prompt_btn, regenerate_captured_btn):
         win.contentView().addSubview_(v)
+    GLOBAL_DELEGATE.step_btn = step_btn
 
     GLOBAL_DELEGATE.field = field
     GLOBAL_DELEGATE.status_lbl = status_lbl
