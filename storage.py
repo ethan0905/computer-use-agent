@@ -7,20 +7,27 @@ from embeddings import get_embedding
 (ROOT_DIR / "success").mkdir(exist_ok=True)
 (ROOT_DIR / "fail").mkdir(exist_ok=True)
 
-successes: List[dict] = []
-failures: List[dict] = []
-if STORE_PATH.exists():
-    with open(STORE_PATH, 'r', encoding='utf-8') as f:
-        for line in f:
-            rec = json.loads(line)
-            if rec.get("reward") == 1:
-                successes.append(rec)
-            else:
-                failures.append(rec)
 
-for rec in successes + failures:
-    if "embedding" not in rec:
-        rec["embedding"] = get_embedding(rec["prompt"])
+def load_cache():
+    successes: List[dict] = []
+    failures: List[dict] = []
+    if STORE_PATH.exists():
+        with open(STORE_PATH, 'r', encoding='utf-8') as f:
+            for line in f:
+                rec = json.loads(line)
+                if rec.get("reward") == 1:
+                    successes.append(rec)
+                else:
+                    failures.append(rec)
+    for rec in successes + failures:
+        if "embedding" not in rec:
+            try:
+                rec["embedding"] = get_embedding(rec["prompt"])
+            except Exception:
+                rec["embedding"] = []
+    return successes, failures
+
+successes, failures = load_cache()
 
 def save_flow(prompt, code, reward, folder_name):
     import datetime, re

@@ -36,7 +36,8 @@ class Delegate(NSObject):
         self._toggle_feedback(False)
         self.code_view.setString_("")
         # --- SMART CACHE LOGIC ---
-        from storage import successes
+        from storage import load_cache
+        successes, _ = load_cache()
         for rec in successes:
             if rec["prompt"].strip().lower() == prompt.strip().lower():
                 self._load_cached_script(rec["code"], rec["prompt"])
