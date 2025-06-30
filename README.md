@@ -31,9 +31,9 @@ Computer use agent that runs on MacOS under GPT-4o-mini, with smart cache system
 ### Getting Started
 
 ```bash
-git clone https://github.com/yourname/mini-focus
-cd mini-focus
-python3 mini_focus_openai.py
+git clone https://github.com/yourname/computer-use-agent
+cd computer-use-agent
+python3 computer-use-agent.py
 ```
 
 Make sure your `.env` file contains a valid OpenAI API key.
@@ -63,13 +63,16 @@ Make sure your `.env` file contains a valid OpenAI API key.
 * **2025‑06‑24 a** — Initial GUI code-runner.
 * **2025‑06‑24 b** — Smart cache logic and feedback archive bug-fix.
 * **2025‑06‑24 c** — Fixed GUI button wiring and feedback toggle restore.
+* — Reinforcement learning
+* — Thumbs up/down
+* — Smart cache codegen logic
+* — Capture mode
+* — Fix capture mode datas stored
+* — Fix codegen prompt + format for auto exec
+* - Regenerate
+  - Save-as-prompt
 
 ### To-Do
 
-* [ ] Multi-line prompt support
-* [ ] Custom temperature / model options
-* [ ] Markdown preview for generated code
-
-### License
-
-Licensed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0). See `LICENSE` file for full terms.
+* [ ] Add regenerate code button (capture mode)
+* [ ] Add rule for codegen to open new window consistency
