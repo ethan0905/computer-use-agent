@@ -76,3 +76,39 @@ Make sure your `.env` file contains a valid OpenAI API key.
 
 * [ ] Add regenerate code button (capture mode)
 * [ ] Add rule for codegen to open new window consistency
+
+### How does it work?
+
+1. Prompt Submission
+The user enters a prompt describing a desired automation or task.
+
+2. Code Generation
+The system checks the smart cache (previous successes/failures) for similar prompts.
+If a close match is found, it can reuse the cached code.
+Otherwise, it generates new code using the OpenAI API, with retrieval-augmented few-shot learning:
+It retrieves the most similar successful and failed examples (using embeddings and cosine distance).
+These examples are included as “shots” in the prompt to the model, guiding it to produce better code.
+3. Code Execution
+The generated (or cached) code is executed automatically.
+
+4. User Feedback (Reward Signal)
+The user can give feedback:
+👍 (Thumbs up): The code worked as intended (reward = 1).
+👎 (Thumbs down): The code failed or was incorrect (reward = 0).
+5. Experience Storage
+Each experience (prompt, code, reward, timestamp, embedding) is saved to experiences.jsonl and to the appropriate folder (success or fail).
+The embedding of the prompt is stored for fast similarity search in future runs.
+
+6. Learning Loop
+On future prompts, the system retrieves the most relevant past successes and failures (using embeddings).
+These are used to:
+Provide positive examples (what worked) and negative examples (what to avoid) to the model.
+Avoid repeating failed attempts.
+Encourage the model to generate code similar to past successes.
+
+Summary:
+This is a form of reinforcement learning from human feedback (RLHF), but implemented as a retrieval-augmented loop:
+
+The “reward” is explicit user feedback.
+The “policy” (code generation) is guided by retrieval of past experiences, not by gradient updates.
+Over time, the system gets better at producing working code for similar prompts, as it learns from your feedback.
