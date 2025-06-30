@@ -9,6 +9,121 @@ import datetime
 from config import ROOT_DIR
 
 class Delegate(NSObject):
+    def showHistory_(self, _):
+        from AppKit import NSWindow, NSScrollView, NSTextView, NSButton, NSTextField, NSMakeRect, NSWindowStyleMaskTitled, NSBackingStoreBuffered
+        from storage import load_cache
+        successes, failures = load_cache()
+        all_flows = successes + failures
+        all_flows.sort(key=lambda r: r.get('timestamp', ''), reverse=True)
+        win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(NSMakeRect(100, 100, 800, 500), NSWindowStyleMaskTitled, NSBackingStoreBuffered, False)
+        win.setTitle_("History: Successes & Failures")
+        scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(20, 90, 760, 350))
+        text_view = NSTextView.alloc().initWithFrame_(NSMakeRect(0, 0, 760, 350))
+        text_view.setEditable_(False)
+        scroll.setDocumentView_(text_view)
+        scroll.setHasVerticalScroller_(True)
+        # Search/filter field
+        search_field = NSTextField.alloc().initWithFrame_(NSMakeRect(20, 450, 300, 26))
+        search_field.setPlaceholderString_("Search prompt or code…")
+        search_btn = NSButton.alloc().initWithFrame_(NSMakeRect(330, 450, 80, 26))
+        search_btn.setTitle_("Filter")
+        search_btn.setTarget_(self)
+        search_btn.setAction_("filterHistory:")
+        # Compose history text
+        def render_history(flows):
+            lines = []
+            for idx, rec in enumerate(flows):
+                lines.append(f"[{idx+1}] {'✔️' if rec.get('reward')==1 else '❌'} {rec.get('timestamp','')}\nPrompt: {rec.get('prompt','')}\n")
+            return "\n".join(lines)
+        text_view.setString_(render_history(all_flows))
+        # Add Replay, Edit, Delete fields/buttons
+        idx_field = NSTextField.alloc().initWithFrame_(NSMakeRect(20, 20, 60, 26))
+        idx_field.setPlaceholderString_("#")
+        replay_btn = NSButton.alloc().initWithFrame_(NSMakeRect(90, 20, 80, 26))
+        replay_btn.setTitle_("Replay")
+        replay_btn.setTarget_(self)
+        replay_btn.setAction_("replayHistory:")
+        edit_btn = NSButton.alloc().initWithFrame_(NSMakeRect(180, 20, 80, 26))
+        edit_btn.setTitle_("Edit")
+        edit_btn.setTarget_(self)
+        edit_btn.setAction_("editHistory:")
+        delete_btn = NSButton.alloc().initWithFrame_(NSMakeRect(270, 20, 80, 26))
+        delete_btn.setTitle_("Delete")
+        delete_btn.setTarget_(self)
+        delete_btn.setAction_("deleteHistory:")
+        # Store for later
+        self._history_flows = all_flows
+        self._history_idx_field = idx_field
+        self._history_win = win
+        self._history_text_view = text_view
+        self._history_search_field = search_field
+        self._history_all_flows = all_flows
+        win.contentView().addSubview_(scroll)
+        win.contentView().addSubview_(idx_field)
+        win.contentView().addSubview_(replay_btn)
+        win.contentView().addSubview_(edit_btn)
+        win.contentView().addSubview_(delete_btn)
+        win.contentView().addSubview_(search_field)
+        win.contentView().addSubview_(search_btn)
+        win.makeKeyAndOrderFront_(None)
+
+    def filterHistory_(self, _):
+        query = self._history_search_field.stringValue().strip().lower()
+        if not query:
+            filtered = self._history_all_flows
+        else:
+            filtered = [rec for rec in self._history_all_flows if query in rec.get('prompt','').lower() or query in rec.get('code','').lower()]
+        # Update the text view
+        lines = []
+        for idx, rec in enumerate(filtered):
+            lines.append(f"[{idx+1}] {'✔️' if rec.get('reward')==1 else '❌'} {rec.get('timestamp','')}\nPrompt: {rec.get('prompt','')}\n")
+        self._history_text_view.setString_("\n".join(lines))
+        self._history_flows = filtered
+
+    def replayHistory_(self, _):
+        idx = int(self._history_idx_field.stringValue() or "0") - 1
+        if 0 <= idx < len(self._history_flows):
+            rec = self._history_flows[idx]
+            self._load_cached_script(rec["code"], rec["prompt"])
+            self._applescript_tag = 'cache'
+            try:
+                ok = run_code(rec["code"])
+                self.last_success = ok
+                self._update_status("✓ Success (replayed)" if ok else "✗ Failed (replayed)")
+            except Exception as exc:
+                self.last_success = False
+                self._update_status(f"✗ Failed (replayed): {exc}")
+                NSLog(f"[ERROR] {exc!r}")
+            self._toggle_feedback(True)
+
+    def editHistory_(self, _):
+        idx = int(self._history_idx_field.stringValue() or "0") - 1
+        if 0 <= idx < len(self._history_flows):
+            rec = self._history_flows[idx]
+            # Load code for editing in the main code view
+            self._load_cached_script(rec["code"], rec["prompt"])
+            self._applescript_tag = 'edit'
+            self._update_status("Edit the code and click Run to test changes.")
+            self._toggle_feedback(False)
+
+    def deleteHistory_(self, _):
+        import json
+        idx = int(self._history_idx_field.stringValue() or "0") - 1
+        if 0 <= idx < len(self._history_flows):
+            rec = self._history_flows[idx]
+            # Remove from file
+            from config import STORE_PATH
+            with open(STORE_PATH, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+            with open(STORE_PATH, 'w', encoding='utf-8') as f:
+                for line in lines:
+                    try:
+                        entry = json.loads(line)
+                        if not (entry.get('prompt') == rec.get('prompt') and entry.get('timestamp') == rec.get('timestamp')):
+                            f.write(line)
+                    except Exception:
+                        f.write(line)
+            self._update_status("Deleted from history. Please close and reopen history to refresh.")
     last_code: str = ""
     last_prompt: str = ""
     last_success: bool = False

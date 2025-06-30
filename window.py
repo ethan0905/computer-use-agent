@@ -8,6 +8,12 @@ global GLOBAL_DELEGATE
 GLOBAL_DELEGATE = Delegate.alloc().init()
 
 def make_window():
+    # Add History button
+    history_btn = NSButton.alloc().initWithFrame_(NSMakeRect(140, 40, 90, 32))
+    history_btn.setTitle_("History")
+    history_btn.setTarget_(GLOBAL_DELEGATE)
+    history_btn.setAction_("showHistory:")
+
     regenerate_captured_btn = NSButton.alloc().initWithFrame_(NSMakeRect(560, 70, 60, 26))
     regenerate_captured_btn.setTitle_("Regenerate")
     regenerate_captured_btn.setTarget_(GLOBAL_DELEGATE)
@@ -78,7 +84,7 @@ def make_window():
     save_prompt_btn.setAction_("saveCapturedFlow:")
     save_prompt_btn.setHidden_(True)
 
-    for v in (field, status_lbl, scroll, run_btn, up_btn, down_btn, exit_btn, capture_btn, test_btn, regenerate_btn, save_prompt_field, save_prompt_btn, regenerate_captured_btn):
+    for v in (field, status_lbl, scroll, run_btn, up_btn, down_btn, exit_btn, capture_btn, history_btn, test_btn, regenerate_btn, save_prompt_field, save_prompt_btn, regenerate_captured_btn):
         win.contentView().addSubview_(v)
 
     GLOBAL_DELEGATE.field = field
@@ -91,6 +97,7 @@ def make_window():
     GLOBAL_DELEGATE.save_prompt_field = save_prompt_field
     GLOBAL_DELEGATE.save_prompt_btn = save_prompt_btn
     GLOBAL_DELEGATE.regenerate_captured_btn = regenerate_captured_btn
+    GLOBAL_DELEGATE.history_btn = history_btn
 
     win.makeKeyAndOrderFront_(None)
     win.makeFirstResponder_(field)
