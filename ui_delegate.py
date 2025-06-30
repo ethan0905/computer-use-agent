@@ -27,14 +27,17 @@ class Delegate(NSObject):
         self._step_test_btns = []
         self._step_validate_btns = []
         self._step_regen_btns = []
+        self._step_fields = []
         for idx, desc in enumerate(steps):
-            label = NSTextField.alloc().initWithFrame_(NSMakeRect(20, y, 400, 24))
-            label.setStringValue_(f"Step {idx+1}: {desc}")
-            label.setBezeled_(False)
-            label.setDrawsBackground_(False)
-            label.setEditable_(False)
-            label.setSelectable_(False)
-            win.contentView().addSubview_(label)
+            # Editable step field
+            step_field = NSTextField.alloc().initWithFrame_(NSMakeRect(20, y, 400, 24))
+            step_field.setStringValue_(desc)
+            step_field.setBezeled_(True)
+            step_field.setDrawsBackground_(True)
+            step_field.setEditable_(True)
+            step_field.setSelectable_(True)
+            win.contentView().addSubview_(step_field)
+            self._step_fields.append(step_field)
             # Right-aligned buttons
             test_btn = NSButton.alloc().initWithFrame_(NSMakeRect(440, y, 70, 24))
             test_btn.setTitle_("Test")
@@ -61,14 +64,15 @@ class Delegate(NSObject):
             self._step_validate_btns.append(validate_btn)
             self._step_regen_btns.append(regen_btn)
             y -= 40
-        # Prompt display
-        prompt_label = NSTextField.alloc().initWithFrame_(NSMakeRect(20, 20, 660, 24))
-        prompt_label.setStringValue_(f'Prompt: "{prompt}"')
-        prompt_label.setBezeled_(False)
-        prompt_label.setDrawsBackground_(False)
-        prompt_label.setEditable_(False)
-        prompt_label.setSelectable_(False)
-        win.contentView().addSubview_(prompt_label)
+        # Editable prompt field
+        prompt_field = NSTextField.alloc().initWithFrame_(NSMakeRect(20, 20, 660, 24))
+        prompt_field.setStringValue_(prompt)
+        prompt_field.setBezeled_(True)
+        prompt_field.setDrawsBackground_(True)
+        prompt_field.setEditable_(True)
+        prompt_field.setSelectable_(True)
+        win.contentView().addSubview_(prompt_field)
+        self._decompose_prompt_field = prompt_field
         # Go back to menu button
         back_btn = NSButton.alloc().initWithFrame_(NSMakeRect(20, 5, 140, 28))
         back_btn.setTitle_("Go back to menu")
@@ -94,8 +98,11 @@ class Delegate(NSObject):
     # --- CLEANED: Only one set of handlers for stepwise/decompose mode ---
     def testStepInList_(self, sender):
         idx = sender.tag()
-        code = self._step_codes[idx]
-        print(f"[UI LOG] Test button pressed for step {idx+1} | Description: {self._step_descriptions[idx]}")
+        # Get current step description from editable field
+        desc = self._step_fields[idx].stringValue()
+        self._step_descriptions[idx] = desc
+        code = self._step_codes[idx] = generate_python_code(desc)
+        print(f"[UI LOG] Test button pressed for step {idx+1} | Description: {desc}")
         try:
             import tempfile, subprocess, sys
             with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as tf:
@@ -122,7 +129,8 @@ class Delegate(NSObject):
 
     def regenerateStepInList_(self, sender):
         idx = sender.tag()
-        desc = self._step_descriptions[idx]
+        desc = self._step_fields[idx].stringValue()
+        self._step_descriptions[idx] = desc
         print(f"[UI LOG] Regenerate button pressed for step {idx+1} | Description: {desc}")
         code = generate_python_code(desc)
         self._step_codes[idx] = code
@@ -131,14 +139,19 @@ class Delegate(NSObject):
 
     def validateStepInList_(self, sender):
         idx = sender.tag()
-        print(f"[UI LOG] Validate button pressed for step {idx+1} | Description: {self._step_descriptions[idx]}")
+        desc = self._step_fields[idx].stringValue()
+        self._step_descriptions[idx] = desc
+        print(f"[UI LOG] Validate button pressed for step {idx+1} | Description: {desc}")
         self._step_valid[idx] = True
         print(f"[UI LOG] Step {idx+1} validated.")
         self._update_status(f"Step {idx+1} validated.")
 
     def testAllSteps_(self, _):
         print("[UI LOG] Test all button pressed")
-        for idx, code in enumerate(self._step_codes):
+        for idx, step_field in enumerate(self._step_fields):
+            desc = step_field.stringValue()
+            self._step_descriptions[idx] = desc
+            code = self._step_codes[idx] = generate_python_code(desc)
             try:
                 import tempfile, subprocess, sys
                 with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as tf:
@@ -165,9 +178,15 @@ class Delegate(NSObject):
 
     def validateAllSteps_(self, _):
         print("[UI LOG] Validate all button pressed")
+        # Update all step descriptions from fields
+        for idx, step_field in enumerate(self._step_fields):
+            desc = step_field.stringValue()
+            self._step_descriptions[idx] = desc
+        # Update prompt from editable field
+        prompt = self._decompose_prompt_field.stringValue()
         if all(self._step_valid):
             full_code = '\n\n'.join(self._step_codes)
-            save_flow(self.field.stringValue().strip(), full_code, 1, "success")
+            save_flow(prompt, full_code, 1, "success")
             self._update_status("All steps validated and full flow stored as success!")
             self._step_list_win.close()
         else:
