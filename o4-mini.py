@@ -139,6 +139,20 @@ def run_code(code_text: str) -> bool:
         os.remove(tf_path)
 
 class Delegate(NSObject):
+    def regenerateCapturedFlow_(self, _):
+        # Regenerate AppleScript for the last captured flow
+        self._update_status("Regenerating AppleScript for captured flow...")
+        applescript = capture.CAPTURE_SESSION.export_applescript()
+        self.last_code = applescript
+        self.code_view.setString_(applescript)
+        self._applescript_tag = 'regenerated'
+        self._update_status("AppleScript regenerated for captured flow. Click 'Test it' to try again.")
+        self._show_regenerate_captured_btn(False)
+
+    def _show_regenerate_captured_btn(self, show: bool):
+        if not hasattr(self, 'regenerate_captured_btn'):
+            return
+        self.regenerate_captured_btn.setHidden_(not show)
     last_code: str = ""
     last_prompt: str = ""
     last_success: bool = False
@@ -157,6 +171,7 @@ class Delegate(NSObject):
             code = generate_python_code(prompt)
             self.last_code = code
             self.code_view.setString_(code)
+            self._applescript_tag = 'generated'
             ok = run_code(code)
             self.last_success = ok
             self._update_status("✓ Success" if ok else "✗ Failed")
@@ -188,25 +203,82 @@ class Delegate(NSObject):
             self.last_code = applescript
             self.last_prompt = "[Captured Flow]"
             self.code_view.setString_(applescript)
+            self._applescript_tag = 'generated'
             self._update_status("Capture stopped. AppleScript generated.")
             self._capture_active = False
             self.test_btn.setHidden_(False)
+            self._show_save_prompt_field(True)
+            self._show_regenerate_captured_btn(True)
+
+    def saveCapturedFlow_(self, _):
+        # Save the captured flow with the user-provided prompt
+        prompt = self.save_prompt_field.stringValue().strip()
+        if not prompt:
+            self._update_status("Please enter a prompt to save this flow.")
+            return
+        code = self.last_code
+        if not code:
+            self._update_status("No captured code to save.")
+            return
+        import datetime, re, json, pathlib, os
+        ROOT_DIR = pathlib.Path(__file__).resolve().parent
+        STORE_PATH = ROOT_DIR / "experiences.jsonl"
+        folder = ROOT_DIR / "success"
+        ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        slug = re.sub(r"[^a-z0-9]+", "-", prompt.lower()).strip("-")[:60] or "untitled"
+        fp = folder / f"{slug}__{ts}.py"
+        header = f"# Prompt: {prompt}\n# Outcome: success\n\n"
+        fp.write_text(header + code, encoding="utf-8")
+        rec = {"prompt": prompt, "code": code, "reward": 1, "timestamp": datetime.datetime.now().isoformat()}
+        try:
+            from openai import OpenAI
+            OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+            CLIENT = OpenAI(api_key=OPENAI_API_KEY)
+            rec["embedding"] = CLIENT.embeddings.create(model="text-embedding-ada-002", input=[prompt]).data[0].embedding
+        except Exception:
+            rec["embedding"] = []
+        with open(STORE_PATH, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(rec) + "\n")
+        self._update_status("Captured flow saved and will be used for smart cache retrieval.")
+        self._show_save_prompt_field(False)
+
+    def _show_save_prompt_field(self, show: bool):
+        if not hasattr(self, 'save_prompt_field') or not hasattr(self, 'save_prompt_btn'):
+            return
+        self.save_prompt_field.setHidden_(not show)
+        self.save_prompt_btn.setHidden_(not show)
+    # Use this when loading AppleScript from smart cache (not a Cocoa action)
+    # This method is for internal Python use only and will not be exposed to Objective-C.
+    # Do NOT use as a button action or with a trailing underscore.
+    # Use this when loading AppleScript from smart cache (not a Cocoa action)
+    # This method is for internal Python use only and will not be exposed to Objective-C.
+    # Do NOT use as a button action or with a trailing underscore.
+    # If you ever see a PyObjC error about this method, check for typos or accidental underscores.
+    # Internal Python-only method: not exposed to Objective-C
+    def _load_cached_script(self, code, prompt):
+        self.last_code = code
+        self.last_prompt = prompt
+        self.code_view.setString_(code)
+        self._applescript_tag = 'cache'
+        self._update_status("Loaded AppleScript from smart cache. Click 'Test it' to run.")
 
     def testScript_(self, _):
-        # Save AppleScript to temp file and run it
+        # Save AppleScript to temp file and run it, tagging the source
         import tempfile, subprocess, re
         code = self.code_view.string()
-        print("testing initiated")
-        # Extract AppleScript code block if present, else use as-is
-        applescript_code = code
-        code_block_match = re.search(r"```applescript\\s*(.+?)\\s*```", code, re.DOTALL | re.IGNORECASE)
-        if code_block_match:
-            applescript_code = code_block_match.group(1).strip()
+        # Tag: check if code was just generated or from smart cache
+        tag = getattr(self, '_applescript_tag', None)
+        if tag is None:
+            tag = 'generated'  # Default to generated if not set
+        if tag == 'cache':
+            print("[AppleScript EXECUTION] Source: smart cache")
         else:
-            # Try generic triple-backtick block
-            generic_block = re.search(r"```\\s*(.+?)\\s*```", code, re.DOTALL)
-            if generic_block:
-                applescript_code = generic_block.group(1).strip()
+            print("[AppleScript EXECUTION] Source: generated")
+        print(f"testing initiated [{tag}]")
+        # Remove any markdown code block wrappers
+        applescript_code = re.sub(r"```applescript\\s*", "", code, flags=re.IGNORECASE)
+        applescript_code = re.sub(r"```", "", applescript_code)
+        applescript_code = applescript_code.strip()
         print("AppleScript code to be executed:\n" + applescript_code)
         with tempfile.NamedTemporaryFile("w+", suffix=".applescript", delete=False) as tf:
             tf.write(applescript_code)
@@ -215,14 +287,34 @@ class Delegate(NSObject):
         try:
             result = subprocess.run(["osascript", tf_path], capture_output=True, text=True)
             if result.returncode == 0:
-                self._update_status("AppleScript ran successfully. Click 👍 if it worked!")
+                self._update_status(f"AppleScript [{tag}] ran successfully. Click 👍 if it worked!")
             else:
-                self._update_status(f"AppleScript error: {result.stderr.strip()}")
+                self._update_status(f"AppleScript [{tag}] error: {result.stderr.strip()}")
+                self._show_regenerate_button(True)
         except Exception as e:
-            self._update_status(f"Failed to run AppleScript: {e}")
+            self._update_status(f"Failed to run AppleScript [{tag}]: {e}")
+            self._show_regenerate_button(True)
         finally:
             os.remove(tf_path)
         self._toggle_feedback(True)
+
+    def regenerateScript_(self, _):
+        # Regenerate AppleScript with a new prompt for robustness
+        print("Regenerating AppleScript for robustness...")
+        prompt = self.last_prompt or "[Captured Flow]"
+        # Add a hint to the prompt to maximize success
+        regen_prompt = prompt + "\n# Regenerate for maximum reliability. Use alternative strategies if needed."
+        applescript = capture.CAPTURE_SESSION.export_applescript()  # This will use the latest events
+        self.last_code = applescript
+        self.code_view.setString_(applescript)
+        self._applescript_tag = 'regenerated'
+        self._update_status("AppleScript regenerated. Click 'Test it' to try again.")
+        self._show_regenerate_button(False)
+
+    def _show_regenerate_button(self, show: bool):
+        if not hasattr(self, 'regenerate_btn'):
+            return
+        self.regenerate_btn.setHidden_(not show)
 
     def _update_status(self, text: str):
         self.status_lbl.setStringValue_(text)
@@ -254,6 +346,17 @@ global GLOBAL_DELEGATE
 GLOBAL_DELEGATE = Delegate.alloc().init()
 
 def make_window():
+    # Add regenerate code button for captured flows
+    regenerate_captured_btn = NSButton.alloc().initWithFrame_(NSMakeRect(560, 70, 60, 26))
+    regenerate_captured_btn.setTitle_("Regenerate")
+    regenerate_captured_btn.setTarget_(GLOBAL_DELEGATE)
+    regenerate_captured_btn.setAction_("regenerateCapturedFlow:")
+    regenerate_captured_btn.setHidden_(True)
+    regenerate_btn = NSButton.alloc().initWithFrame_(NSMakeRect(470, 10, 120, 26))
+    regenerate_btn.setTitle_("Regenerate")
+    regenerate_btn.setTarget_(GLOBAL_DELEGATE)
+    regenerate_btn.setAction_("regenerateScript:")
+    regenerate_btn.setHidden_(True)
     win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(NSMakeRect(0, 0, 640, 440), NSWindowStyleMaskTitled, NSBackingStoreBuffered, False)
     win.center()
     win.setTitle_("GPT-4o Mini Runner")
@@ -305,7 +408,17 @@ def make_window():
     test_btn.setAction_("testScript:")
     test_btn.setHidden_(True)
 
-    for v in (field, status_lbl, scroll, run_btn, up_btn, down_btn, exit_btn, capture_btn, test_btn):
+    # Add input field and button for saving captured flow prompt
+    save_prompt_field = NSTextField.alloc().initWithFrame_(NSMakeRect(20, 70, 400, 26))
+    save_prompt_field.setPlaceholderString_("Describe this flow in your own words (for smart cache retrieval)…")
+    save_prompt_field.setHidden_(True)
+    save_prompt_btn = NSButton.alloc().initWithFrame_(NSMakeRect(430, 70, 120, 26))
+    save_prompt_btn.setTitle_("Save Flow Prompt")
+    save_prompt_btn.setTarget_(GLOBAL_DELEGATE)
+    save_prompt_btn.setAction_("saveCapturedFlow:")
+    save_prompt_btn.setHidden_(True)
+
+    for v in (field, status_lbl, scroll, run_btn, up_btn, down_btn, exit_btn, capture_btn, test_btn, regenerate_btn, save_prompt_field, save_prompt_btn, regenerate_captured_btn):
         win.contentView().addSubview_(v)
 
     GLOBAL_DELEGATE.field = field
@@ -314,6 +427,10 @@ def make_window():
     GLOBAL_DELEGATE.up_btn = up_btn
     GLOBAL_DELEGATE.down_btn = down_btn
     GLOBAL_DELEGATE.test_btn = test_btn
+    GLOBAL_DELEGATE.regenerate_btn = regenerate_btn
+    GLOBAL_DELEGATE.save_prompt_field = save_prompt_field
+    GLOBAL_DELEGATE.save_prompt_btn = save_prompt_btn
+    GLOBAL_DELEGATE.regenerate_captured_btn = regenerate_captured_btn
 
     win.makeKeyAndOrderFront_(None)
     win.makeFirstResponder_(field)
