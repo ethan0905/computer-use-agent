@@ -35,6 +35,24 @@ class Delegate(NSObject):
         self._update_status("Working…")
         self._toggle_feedback(False)
         self.code_view.setString_("")
+        # --- SMART CACHE LOGIC ---
+        from storage import successes
+        for rec in successes:
+            if rec["prompt"].strip().lower() == prompt.strip().lower():
+                self._load_cached_script(rec["code"], rec["prompt"])
+                self._applescript_tag = 'cache'
+                # Automatically run the cached code
+                try:
+                    ok = run_code(rec["code"])
+                    self.last_success = ok
+                    self._update_status("✓ Success (from smart cache)" if ok else "✗ Failed (from smart cache)")
+                except Exception as exc:
+                    self.last_success = False
+                    self._update_status(f"✗ Failed (from smart cache): {exc}")
+                    NSLog(f"[ERROR] {exc!r}")
+                self._toggle_feedback(True)
+                return
+        # --- END SMART CACHE LOGIC ---
         try:
             code = generate_python_code(prompt)
             self.last_code = code
