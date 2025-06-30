@@ -5,8 +5,13 @@ from storage import save_flow
 import capture
 import os
 import datetime
-
 from config import ROOT_DIR
+# Ensure all AppKit symbols are available for UI layout
+from AppKit import (
+    NSWindow, NSButton, NSTextField, NSScrollView, NSView, NSMakeRect, NSWindowStyleMaskTitled, NSBackingStoreBuffered,
+    NSStackView, NSUserInterfaceLayoutOrientationVertical
+    , NSFont
+)
 
 class Delegate(NSObject):
     def decompose_(self, _):
@@ -21,58 +26,196 @@ class Delegate(NSObject):
         self._step_codes = [generate_python_code(s) for s in steps]
         self._step_valid = [False] * len(steps)
         # Main complex task window
-        win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(NSMakeRect(120, 120, 700, 120 + 40*len(steps)), NSWindowStyleMaskTitled, NSBackingStoreBuffered, False)
+        win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(NSMakeRect(120, 120, 740, 520), NSWindowStyleMaskTitled, NSBackingStoreBuffered, False)
         win.setTitle_("Complex Task!")
-        y = 60 + 40 * (len(steps)-1)
-        self._step_test_btns = []
-        self._step_validate_btns = []
-        self._step_regen_btns = []
-        self._step_fields = []
-        for idx, desc in enumerate(steps):
-            # Editable step field
-            step_field = NSTextField.alloc().initWithFrame_(NSMakeRect(20, y, 400, 24))
-            step_field.setStringValue_(desc)
-            step_field.setBezeled_(True)
-            step_field.setDrawsBackground_(True)
-            step_field.setEditable_(True)
-            step_field.setSelectable_(True)
-            win.contentView().addSubview_(step_field)
-            self._step_fields.append(step_field)
-            # Right-aligned buttons
-            test_btn = NSButton.alloc().initWithFrame_(NSMakeRect(440, y, 70, 24))
-            test_btn.setTitle_("Test")
-            test_btn.setTag_(idx)
-            test_btn.setTarget_(self)
-            test_btn.setAction_("testStepInList:")
-            test_btn.setEnabled_(True)
-            regen_btn = NSButton.alloc().initWithFrame_(NSMakeRect(515, y, 90, 24))
-            regen_btn.setTitle_("Regenerate")
-            regen_btn.setTag_(idx)
-            regen_btn.setTarget_(self)
-            regen_btn.setAction_("regenerateStepInList:")
-            regen_btn.setEnabled_(True)
-            validate_btn = NSButton.alloc().initWithFrame_(NSMakeRect(610, y, 80, 24))
-            validate_btn.setTitle_("Validate")
-            validate_btn.setTag_(idx)
-            validate_btn.setTarget_(self)
-            validate_btn.setAction_("validateStepInList:")
-            validate_btn.setEnabled_(True)
-            win.contentView().addSubview_(test_btn)
-            win.contentView().addSubview_(regen_btn)
-            win.contentView().addSubview_(validate_btn)
-            self._step_test_btns.append(test_btn)
-            self._step_validate_btns.append(validate_btn)
-            self._step_regen_btns.append(regen_btn)
-            y -= 40
-        # Editable prompt field
-        prompt_field = NSTextField.alloc().initWithFrame_(NSMakeRect(20, 20, 660, 24))
+        win.setReleasedWhenClosed_(False)  # Prevent window from being deallocated
+        # --- Scrollable area for prompt + steps ---
+        scroll_height = 340
+        scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(10, 60, 720, scroll_height))
+        scroll.setHasVerticalScroller_(True)
+        # Use a plain NSView for stacking rows manually (not NSStackView, which can be buggy with dynamic content in PyObjC)
+        steps_view = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, 700, 1000))
+        scroll.setDocumentView_(steps_view)
+        content_root = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, 740, 520))
+        win.setContentView_(content_root)
+        win.makeKeyAndOrderFront_(None)
+        scroll.setAutoresizingMask_(18)  # width + height flexible
+        steps_view.setAutoresizingMask_(18)
+        content_root.addSubview_(scroll)
+        # --- Editable prompt field inside scrollable area ---
+        prompt_field = NSTextField.alloc().initWithFrame_(NSMakeRect(20, 10, 660, 24))
         prompt_field.setStringValue_(prompt)
         prompt_field.setBezeled_(True)
         prompt_field.setDrawsBackground_(True)
         prompt_field.setEditable_(True)
         prompt_field.setSelectable_(True)
-        win.contentView().addSubview_(prompt_field)
+        prompt_field.setFont_(NSFont.boldSystemFontOfSize_(14))
+        steps_view.addSubview_(prompt_field)
         self._decompose_prompt_field = prompt_field
+        # --- Step fields and buttons inside scrollable area ---
+        self._step_test_btns = []
+        self._step_validate_btns = []
+        self._step_regen_btns = []
+        self._step_delete_btns = []
+        self._step_fields = []
+        self._step_row_views = []
+        def add_step_row(idx, desc):
+            y = 50 + idx * 40
+            row_view = NSView.alloc().initWithFrame_(NSMakeRect(0, y, 700, 36))
+            # Editable step field
+            step_field = NSTextField.alloc().initWithFrame_(NSMakeRect(20, 6, 340, 24))
+            step_field.setStringValue_(desc)
+            step_field.setBezeled_(True)
+            step_field.setDrawsBackground_(True)
+            step_field.setEditable_(True)
+            step_field.setSelectable_(True)
+            step_field.setFont_(NSFont.systemFontOfSize_(13))
+            row_view.addSubview_(step_field)
+            # Test button
+            test_btn = NSButton.alloc().initWithFrame_(NSMakeRect(370, 6, 60, 24))
+            test_btn.setTitle_("Test")
+            test_btn.setTag_(idx)
+            test_btn.setTarget_(self)
+            test_btn.setAction_("testStepInList:")
+            test_btn.setEnabled_(True)
+            row_view.addSubview_(test_btn)
+            # Regenerate button
+            regen_btn = NSButton.alloc().initWithFrame_(NSMakeRect(435, 6, 80, 24))
+            regen_btn.setTitle_("Regenerate")
+            regen_btn.setTag_(idx)
+            regen_btn.setTarget_(self)
+            regen_btn.setAction_("regenerateStepInList:")
+            regen_btn.setEnabled_(True)
+            row_view.addSubview_(regen_btn)
+            # Validate button
+            validate_btn = NSButton.alloc().initWithFrame_(NSMakeRect(520, 6, 70, 24))
+            validate_btn.setTitle_("Validate")
+            validate_btn.setTag_(idx)
+            validate_btn.setTarget_(self)
+            validate_btn.setAction_("validateStepInList:")
+            validate_btn.setEnabled_(True)
+            row_view.addSubview_(validate_btn)
+            # Delete button
+            delete_btn = NSButton.alloc().initWithFrame_(NSMakeRect(600, 6, 60, 24))
+            delete_btn.setTitle_("Delete")
+            delete_btn.setTag_(idx)
+            delete_btn.setTarget_(self)
+            delete_btn.setAction_("deleteStepInList:")
+            delete_btn.setEnabled_(True)
+            row_view.addSubview_(delete_btn)
+            # Store references
+            self._step_fields.insert(idx, step_field)
+            self._step_test_btns.insert(idx, test_btn)
+            self._step_regen_btns.insert(idx, regen_btn)
+            self._step_validate_btns.insert(idx, validate_btn)
+            self._step_delete_btns.insert(idx, delete_btn)
+            self._step_row_views.insert(idx, row_view)
+            steps_view.addSubview_(row_view)
+        # Add all initial steps
+        for idx, desc in enumerate(steps):
+            add_step_row(idx, desc)
+        self._step_descriptions = [f.stringValue() for f in self._step_fields]
+        # Adjust steps_view height to fit all rows
+        steps_view.setFrame_(NSMakeRect(0, 0, 700, 50 + len(steps) * 40 + 20))
+        # Add Step button OUTSIDE scrollable area
+        add_btn = NSButton.alloc().initWithFrame_(NSMakeRect(620, 470, 90, 28))
+        add_btn.setTitle_("Add Step")
+        add_btn.setTarget_(self)
+        add_btn.setAction_("addStepInList:")
+        content_root.addSubview_(add_btn)
+        # Go back, Test all, Validate all OUTSIDE scrollable area
+        back_btn = NSButton.alloc().initWithFrame_(NSMakeRect(20, 10, 140, 28))
+        back_btn.setTitle_("Go back to menu")
+        back_btn.setTarget_(self)
+        back_btn.setAction_("closeStepList:")
+        content_root.addSubview_(back_btn)
+        test_all_btn = NSButton.alloc().initWithFrame_(NSMakeRect(370, 10, 100, 28))
+        test_all_btn.setTitle_("Test all")
+        test_all_btn.setTarget_(self)
+        test_all_btn.setAction_("testAllSteps:")
+        content_root.addSubview_(test_all_btn)
+        validate_all_btn = NSButton.alloc().initWithFrame_(NSMakeRect(480, 10, 120, 28))
+        validate_all_btn.setTitle_("Validate All")
+        validate_all_btn.setTarget_(self)
+        validate_all_btn.setAction_("validateAllSteps:")
+        content_root.addSubview_(validate_all_btn)
+        self._step_list_win = win
+        self._step_scroll = scroll
+        self._step_content_view = stack_view
+        self._add_step_btn = add_btn
+        win.makeKeyAndOrderFront_(None)
+
+    def addStepInList_(self, _):
+        idx = len(self._step_fields)
+        # Add new row to stack view
+        row_view = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, 700, 36))
+        step_field = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 6, 340, 24))
+        step_field.setStringValue_("")
+        step_field.setBezeled_(True)
+        step_field.setDrawsBackground_(True)
+        step_field.setEditable_(True)
+        step_field.setSelectable_(True)
+        row_view.addSubview_(step_field)
+        test_btn = NSButton.alloc().initWithFrame_(NSMakeRect(350, 6, 60, 24))
+        test_btn.setTitle_("Test")
+        test_btn.setTag_(idx)
+        test_btn.setTarget_(self)
+        test_btn.setAction_("testStepInList:")
+        test_btn.setEnabled_(True)
+        row_view.addSubview_(test_btn)
+        regen_btn = NSButton.alloc().initWithFrame_(NSMakeRect(415, 6, 80, 24))
+        regen_btn.setTitle_("Regenerate")
+        regen_btn.setTag_(idx)
+        regen_btn.setTarget_(self)
+        regen_btn.setAction_("regenerateStepInList:")
+        regen_btn.setEnabled_(True)
+        row_view.addSubview_(regen_btn)
+        validate_btn = NSButton.alloc().initWithFrame_(NSMakeRect(500, 6, 70, 24))
+        validate_btn.setTitle_("Validate")
+        validate_btn.setTag_(idx)
+        validate_btn.setTarget_(self)
+        validate_btn.setAction_("validateStepInList:")
+        validate_btn.setEnabled_(True)
+        row_view.addSubview_(validate_btn)
+        delete_btn = NSButton.alloc().initWithFrame_(NSMakeRect(580, 6, 60, 24))
+        delete_btn.setTitle_("Delete")
+        delete_btn.setTag_(idx)
+        delete_btn.setTarget_(self)
+        delete_btn.setAction_("deleteStepInList:")
+        delete_btn.setEnabled_(True)
+        row_view.addSubview_(delete_btn)
+        self._step_fields.append(step_field)
+        self._step_test_btns.append(test_btn)
+        self._step_regen_btns.append(regen_btn)
+        self._step_validate_btns.append(validate_btn)
+        self._step_delete_btns.append(delete_btn)
+        self._step_row_views.append(row_view)
+        self._step_codes.append("")
+        self._step_valid.append(False)
+        self._step_descriptions.append("")
+        self._step_scroll.documentView().addArrangedSubview_(row_view)
+        # Scroll to bottom
+        self._step_scroll.contentView().scrollToPoint_((0, self._step_scroll.documentView().frame().size.height))
+
+    def deleteStepInList_(self, sender):
+        idx = sender.tag()
+        # Remove row view from stack view
+        row_view = self._step_row_views.pop(idx)
+        self._step_scroll.documentView().removeArrangedSubview_(row_view)
+        row_view.removeFromSuperview()
+        # Remove from all lists
+        self._step_fields.pop(idx)
+        self._step_test_btns.pop(idx)
+        self._step_regen_btns.pop(idx)
+        self._step_validate_btns.pop(idx)
+        self._step_delete_btns.pop(idx)
+        self._step_descriptions.pop(idx)
+        self._step_codes.pop(idx)
+        self._step_valid.pop(idx)
+        # Re-tag all remaining buttons
+        for i in range(len(self._step_row_views)):
+            for btn_list in [self._step_test_btns, self._step_regen_btns, self._step_validate_btns, self._step_delete_btns]:
+                btn_list[i].setTag_(i)
         # Go back to menu button
         back_btn = NSButton.alloc().initWithFrame_(NSMakeRect(20, 5, 140, 28))
         back_btn.setTitle_("Go back to menu")
