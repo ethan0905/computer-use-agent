@@ -41,16 +41,19 @@ class Delegate(NSObject):
             test_btn.setTag_(idx)
             test_btn.setTarget_(self)
             test_btn.setAction_("testStepInList:")
+            test_btn.setEnabled_(True)
             regen_btn = NSButton.alloc().initWithFrame_(NSMakeRect(515, y, 90, 24))
             regen_btn.setTitle_("Regenerate")
             regen_btn.setTag_(idx)
             regen_btn.setTarget_(self)
             regen_btn.setAction_("regenerateStepInList:")
+            regen_btn.setEnabled_(True)
             validate_btn = NSButton.alloc().initWithFrame_(NSMakeRect(610, y, 80, 24))
             validate_btn.setTitle_("Validate")
             validate_btn.setTag_(idx)
             validate_btn.setTarget_(self)
             validate_btn.setAction_("validateStepInList:")
+            validate_btn.setEnabled_(True)
             win.contentView().addSubview_(test_btn)
             win.contentView().addSubview_(regen_btn)
             win.contentView().addSubview_(validate_btn)
@@ -87,215 +90,81 @@ class Delegate(NSObject):
         self._step_list_win = win
         win.makeKeyAndOrderFront_(None)
 
+
+    # --- CLEANED: Only one set of handlers for stepwise/decompose mode ---
     def testStepInList_(self, sender):
         idx = sender.tag()
         code = self._step_codes[idx]
+        print(f"[UI LOG] Test button pressed for step {idx+1} | Description: {self._step_descriptions[idx]}")
         try:
-            ok = run_code(code)
-            self._update_status(f"Step {idx+1} test: {'Success' if ok else 'Failed'}")
+            import tempfile, subprocess, sys
+            with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as tf:
+                tf.write(code)
+                tf.flush()
+                tf_path = tf.name
+            result = subprocess.run([sys.executable, tf_path], capture_output=True, text=True)
+            output = result.stdout.strip()
+            error = result.stderr.strip()
+            if result.returncode == 0:
+                print(f"[UI LOG] Step {idx+1} test result: Success\nOutput:\n{output}")
+                self._update_status(f"Step {idx+1} test: Success")
+            else:
+                print(f"[UI LOG] Step {idx+1} test result: Failed\nError:\n{error}")
+                self._update_status(f"Step {idx+1} test failed: {error}")
         except Exception as exc:
+            print(f"[UI LOG] Step {idx+1} test failed: {exc}")
             self._update_status(f"Step {idx+1} test failed: {exc}")
-
-    def validateStepInList_(self, sender):
-        idx = sender.tag()
-        self._step_valid[idx] = True
-        self._update_status(f"Step {idx+1} validated.")
+        finally:
+            try:
+                os.remove(tf_path)
+            except Exception:
+                pass
 
     def regenerateStepInList_(self, sender):
         idx = sender.tag()
         desc = self._step_descriptions[idx]
+        print(f"[UI LOG] Regenerate button pressed for step {idx+1} | Description: {desc}")
         code = generate_python_code(desc)
         self._step_codes[idx] = code
+        print(f"[UI LOG] Step {idx+1} regenerated code: {code[:80]}{'...' if len(code) > 80 else ''}")
         self._update_status(f"Step {idx+1} regenerated.")
 
+    def validateStepInList_(self, sender):
+        idx = sender.tag()
+        print(f"[UI LOG] Validate button pressed for step {idx+1} | Description: {self._step_descriptions[idx]}")
+        self._step_valid[idx] = True
+        print(f"[UI LOG] Step {idx+1} validated.")
+        self._update_status(f"Step {idx+1} validated.")
+
     def testAllSteps_(self, _):
+        print("[UI LOG] Test all button pressed")
         for idx, code in enumerate(self._step_codes):
             try:
-                ok = run_code(code)
-                self._update_status(f"Step {idx+1} test: {'Success' if ok else 'Failed'}")
+                import tempfile, subprocess, sys
+                with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as tf:
+                    tf.write(code)
+                    tf.flush()
+                    tf_path = tf.name
+                result = subprocess.run([sys.executable, tf_path], capture_output=True, text=True)
+                output = result.stdout.strip()
+                error = result.stderr.strip()
+                if result.returncode == 0:
+                    print(f"[UI LOG] Step {idx+1} test result: Success\nOutput:\n{output}")
+                    self._update_status(f"Step {idx+1} test: Success")
+                else:
+                    print(f"[UI LOG] Step {idx+1} test result: Failed\nError:\n{error}")
+                    self._update_status(f"Step {idx+1} test failed: {error}")
             except Exception as exc:
+                print(f"[UI LOG] Step {idx+1} test failed: {exc}")
                 self._update_status(f"Step {idx+1} test failed: {exc}")
+            finally:
+                try:
+                    os.remove(tf_path)
+                except Exception:
+                    pass
 
     def validateAllSteps_(self, _):
-        if all(self._step_valid):
-            full_code = '\n\n'.join(self._step_codes)
-            save_flow(self.field.stringValue().strip(), full_code, 1, "success")
-            self._update_status("All steps validated and full flow stored as success!")
-            self._step_list_win.close()
-        else:
-            self._update_status("Please validate each step before storing.")
-
-    def closeStepList_(self, _):
-        if hasattr(self, '_step_list_win') and self._step_list_win:
-            self._step_list_win.close()
-
-    def testStepInList_(self, sender):
-        idx = sender.tag()
-        code = self._step_codes[idx]
-        try:
-            ok = run_code(code)
-            self._update_status(f"Step {idx+1} test: {'Success' if ok else 'Failed'}")
-        except Exception as exc:
-            self._update_status(f"Step {idx+1} test failed: {exc}")
-
-    def validateStepInList_(self, sender):
-        idx = sender.tag()
-        self._step_valid[idx] = True
-        self._update_status(f"Step {idx+1} validated.")
-
-    def regenerateStepInList_(self, sender):
-        idx = sender.tag()
-        desc = self._step_descriptions[idx]
-        code = generate_python_code(desc)
-        self._step_codes[idx] = code
-        self._update_status(f"Step {idx+1} regenerated.")
-
-    def testAllSteps_(self, _):
-        for idx, code in enumerate(self._step_codes):
-            try:
-                ok = run_code(code)
-                self._update_status(f"Step {idx+1} test: {'Success' if ok else 'Failed'}")
-            except Exception as exc:
-                self._update_status(f"Step {idx+1} test failed: {exc}")
-
-    def validateAllSteps_(self, _):
-        if all(self._step_valid):
-            full_code = '\n\n'.join(self._step_codes)
-            save_flow(self.field.stringValue().strip(), full_code, 1, "success")
-            self._update_status("All steps validated and full flow stored as success!")
-            self._step_list_win.close()
-        else:
-            self._update_status("Please validate each step before storing.")
-
-    def closeStepList_(self, _):
-        if hasattr(self, '_step_list_win') and self._step_list_win:
-            self._step_list_win.close()
-
-    def testStepInList_(self, sender):
-        idx = sender.tag()
-        code = self._step_code_cache[idx]
-        try:
-            ok = run_code(code)
-            self._update_status(f"Step {idx+1} test: {'Success' if ok else 'Failed'}")
-        except Exception as exc:
-            self._update_status(f"Step {idx+1} test failed: {exc}")
-
-    def validateStepInList_(self, sender):
-        idx = sender.tag()
-        self._step_valid[idx] = True
-        self._update_status(f"Step {idx+1} validated.")
-
-    def regenerateStepInList_(self, sender):
-        idx = sender.tag()
-        desc = self._step_descriptions[idx]
-        code = generate_python_code(desc)
-        self._step_code_cache[idx] = code
-        self._update_status(f"Step {idx+1} regenerated.")
-
-    def testAllSteps_(self, _):
-        for idx, code in enumerate(self._step_code_cache):
-            try:
-                ok = run_code(code)
-                self._update_status(f"Step {idx+1} test: {'Success' if ok else 'Failed'}")
-            except Exception as exc:
-                self._update_status(f"Step {idx+1} test failed: {exc}")
-
-    def validateAllSteps_(self, _):
-        if all(self._step_valid):
-            full_code = '\n\n'.join(self._step_code_cache)
-            save_flow(self.field.stringValue().strip(), full_code, 1, "success")
-            self._update_status("All steps validated and full flow stored as success!")
-            self._step_list_win.close()
-        else:
-            self._update_status("Please validate each step before storing.")
-
-    def closeStepList_(self, _):
-        if hasattr(self, '_step_list_win') and self._step_list_win:
-            self._step_list_win.close()
-
-    def testStepInList_(self, sender):
-        idx = sender.tag()
-        code_view = self._step_code_views[idx]
-        code = code_view.string()
-        self._step_codes[idx] = code
-        try:
-            ok = run_code(code)
-            self._update_status(f"Step {idx+1} test: {'Success' if ok else 'Failed'}")
-        except Exception as exc:
-            self._update_status(f"Step {idx+1} test failed: {exc}")
-
-    def validateStepInList_(self, sender):
-        idx = sender.tag()
-        code_view = self._step_code_views[idx]
-        code = code_view.string()
-        self._step_codes[idx] = code
-        self._step_valid[idx] = True
-        self._update_status(f"Step {idx+1} validated.")
-
-    def regenerateStepInList_(self, sender):
-        idx = sender.tag()
-        desc = self._step_descriptions[idx]
-        code = generate_python_code(desc)
-        self._step_codes[idx] = code
-        self._step_code_views[idx].setString_(code)
-        self._update_status(f"Step {idx+1} regenerated.")
-
-    def testAllSteps_(self, _):
-        for idx, code_view in enumerate(self._step_code_views):
-            code = code_view.string()
-            self._step_codes[idx] = code
-            try:
-                ok = run_code(code)
-                self._update_status(f"Step {idx+1} test: {'Success' if ok else 'Failed'}")
-            except Exception as exc:
-                self._update_status(f"Step {idx+1} test failed: {exc}")
-
-    def validateAllSteps_(self, _):
-        if all(self._step_valid):
-            full_code = '\n\n'.join(self._step_codes)
-            save_flow(self.field.stringValue().strip(), full_code, 1, "success")
-            self._update_status("All steps validated and full flow stored as success!")
-            self._step_list_win.close()
-        else:
-            self._update_status("Please validate each step before storing.")
-
-    def closeStepList_(self, _):
-        if hasattr(self, '_step_list_win') and self._step_list_win:
-            self._step_list_win.close()
-
-    def testStepInList_(self, sender):
-        idx = sender.tag()
-        code_view = self._step_code_views[idx]
-        code_view.setHidden_(False)
-        code = code_view.string()
-        self._step_codes[idx] = code
-        try:
-            ok = run_code(code)
-            self._update_status(f"Step {idx+1} test: {'Success' if ok else 'Failed'}")
-        except Exception as exc:
-            self._update_status(f"Step {idx+1} test failed: {exc}")
-
-    def validateStepInList_(self, sender):
-        idx = sender.tag()
-        code_view = self._step_code_views[idx]
-        code_view.setHidden_(False)
-        code = code_view.string()
-        self._step_codes[idx] = code
-        self._step_valid[idx] = True
-        self._update_status(f"Step {idx+1} validated.")
-
-    def testAllSteps_(self, _):
-        for idx, code_view in enumerate(self._step_code_views):
-            code_view.setHidden_(False)
-            code = code_view.string()
-            self._step_codes[idx] = code
-            try:
-                ok = run_code(code)
-                self._update_status(f"Step {idx+1} test: {'Success' if ok else 'Failed'}")
-            except Exception as exc:
-                self._update_status(f"Step {idx+1} test failed: {exc}")
-
-    def validateAllSteps_(self, _):
+        print("[UI LOG] Validate all button pressed")
         if all(self._step_valid):
             full_code = '\n\n'.join(self._step_codes)
             save_flow(self.field.stringValue().strip(), full_code, 1, "success")

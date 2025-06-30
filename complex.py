@@ -1,3 +1,24 @@
+# --- UI LOG BUTTON EXAMPLES ---
+def log_test_button(idx, desc):
+    print(f"[UI LOG] Test button pressed for step {idx+1} | Description: {desc}")
+
+def log_regenerate_button(idx, desc, code):
+    print(f"[UI LOG] Regenerate button pressed for step {idx+1} | Description: {desc}")
+    print(f"[UI LOG] Step {idx+1} regenerated code: {code[:80]}{'...' if len(code) > 80 else ''}")
+
+def log_validate_button(idx, desc):
+    print(f"[UI LOG] Validate button pressed for step {idx+1} | Description: {desc}")
+    print(f"[UI LOG] Step {idx+1} validated.")
+
+# Example usage:
+if __name__ == "__main__":
+    # Simulate three steps
+    steps = ["Open Perplexity", "Search for AI research", "Copy first result"]
+    codes = ["code1()", "code2()", "code3()"]
+    for idx, desc in enumerate(steps):
+        log_test_button(idx, desc)
+        log_regenerate_button(idx, desc, codes[idx])
+        log_validate_button(idx, desc)
 """
 complex.py – Decompose complex user requests into small, verifiable steps with user validation.
 
